@@ -20,13 +20,14 @@ shows a glowing LED. The real board gives you a dead pin.
 
 ## Status
 
-**M2 complete** — there is an app. Load an example, press Run, and watch a real LED light from real
-firmware; omit the resistor and the Problems panel tells you the pin is passing 93.3 mA.
+**M3 complete** — the app now measures as well as simulates. Scope and logic analyser on uPlot,
+named register inspector, and a serial decoder that reads bytes back off the voltage on D1 rather
+than from the peripheral that sent them.
 
 - [x] **M0** Monorepo, compile service, AVR core binding, 1 Hz Blink verified
 - [x] **M1** MNA analog solver, pin electrical model, event-driven co-simulation
 - [x] **M2** Konva workspace, breadboard wiring, Monaco editor, serial monitor
-- [ ] **M3** Oscilloscope, logic analyzer, register inspector, fault detection
+- [x] **M3** Oscilloscope, logic analyser with serial decode, register inspector, fault detection
 - [ ] **M4** Part library breadth, `.rjp` project files, schematic view
 - [ ] **M5** Tauri desktop shell, teaching hooks
 
@@ -98,6 +99,17 @@ regenerable with `npm run fixtures:build` and hashes identically each time.
 the Arduino core spins until the timer0 millis() tick advances and then costs a few more cycles in
 the loop. There is a test asserting that overshoot is *non-zero*: if it ever became exactly
 500.000000 ms we would have lost fidelity, not gained accuracy.
+
+**The USART drives its pin.** avr8js models the USART behaviourally — it reports the byte written
+to UDR and never touches D1. Fine for a serial monitor, useless for a logic analyser, and it makes
+the most common serial fault of all, a baud rate that does not match, impossible to observe. The TX
+waveform is synthesised here from UBRR and the U2X multiplier read straight from the registers, so
+`Serial.begin(9600)` really does put 104 µs bits on the wire, and `pinState` honours the datasheet's
+pin-override table once TXEN is set.
+
+**Capture is event-driven, like the solver.** Samples are taken on every analog solve rather than
+on a sample clock, and the solver already re-solves the instant a pin changes — so an edge lands in
+the buffer at its exact time. That is what makes decoding a real UART frame possible at all.
 
 **`pinMode(OUTPUT)` produces an observable glitch.** Setting DDRB while PORTB is still 0 drives the
 pin LOW for ~50 cycles before `digitalWrite` raises it. That is real, a latch or MOSFET gate would

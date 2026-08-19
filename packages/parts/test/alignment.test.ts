@@ -102,8 +102,14 @@ describe.each(EXAMPLES.map((e) => [e.name, e] as const))('%s', (_name, example) 
       }
     }
 
-    // Guard against the test silently checking nothing if the project shape changes.
-    expect(checked).toBeGreaterThan(0);
+    // Guard against the test silently passing because it checked nothing -- but only when there
+    // is something to check. An example with no breadboard (the serial one is just an Uno) has no
+    // legs in holes by construction, and demanding otherwise would force every future example to
+    // carry a breadboard it does not need.
+    const hasPluggableParts =
+      boards.size > 0 &&
+      project.parts.some((part) => safeDefinition(part.type)?.category !== 'board');
+    if (hasPluggableParts) expect(checked).toBeGreaterThan(0);
   });
 
   it('keeps every leg within the board it is plugged into', () => {

@@ -81,13 +81,18 @@ export function ProblemsPanel() {
             <ListItemText
               primary={fault.message}
               secondary={
-                <Stack direction="row" spacing={0.5} component="span" sx={{ mt: 0.3 }}>
+                <Stack direction="row" spacing={0.5} sx={{ mt: 0.3 }}>
                   <Chip label={fault.subject} size="small" variant="outlined" />
                   <Chip label={fault.code} size="small" variant="outlined" />
                   <Chip label={`t = ${fault.time.toFixed(3)} s`} size="small" variant="outlined" />
                 </Stack>
               }
-              slotProps={{ primary: { variant: 'body2' } }}
+              slotProps={{
+                primary: { variant: 'body2' },
+                // MUI renders the secondary slot as a <p>, and Chip renders a <div>. A div inside
+                // a p is invalid HTML and the browser silently restructures the DOM around it.
+                secondary: { component: 'div' },
+              }}
             />
           </ListItem>
         ))}

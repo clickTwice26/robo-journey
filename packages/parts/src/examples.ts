@@ -171,7 +171,49 @@ const BUTTON: Example = {
     }),
 };
 
-export const EXAMPLES: readonly Example[] = [BLINK, NO_RESISTOR, BUTTON];
+/**
+ * Serial output, for the logic analyser.
+ *
+ * No external parts: the point is the waveform on D1. Turn on "Decode D1 as serial" in the Scope
+ * and the analyser reads the bytes back off the wire, which is a different claim from the serial
+ * monitor showing them -- the monitor reports what the peripheral said it sent, the analyser
+ * reports what actually reached the pin.
+ */
+const SERIAL: Example = {
+  id: 'serial',
+  name: 'Serial output',
+  description: 'Prints over the USART. Open the Scope and decode D1 to read it off the wire.',
+  build: () =>
+    parseProject({
+      version: 1,
+      name: 'Serial',
+      parts: [{ id: 'uno1', type: 'arduino-uno', x: 0, y: 0 }],
+      wires: [],
+      sketch: [
+        {
+          name: 'sketch.ino',
+          contents: [
+            '// Watch D1 in the Scope with serial decoding on: the bytes below appear as a',
+            '// waveform first and as text second.',
+            'int count = 0;',
+            '',
+            'void setup() {',
+            '  Serial.begin(9600);',
+            '}',
+            '',
+            'void loop() {',
+            '  Serial.print("count=");',
+            '  Serial.println(count++);',
+            '  delay(200);',
+            '}',
+            '',
+          ].join('\n'),
+        },
+      ],
+    }),
+};
+
+export const EXAMPLES: readonly Example[] = [BLINK, NO_RESISTOR, BUTTON, SERIAL];
 
 export function exampleById(id: string): Example | undefined {
   return EXAMPLES.find((e) => e.id === id);

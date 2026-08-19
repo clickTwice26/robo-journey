@@ -9,9 +9,51 @@
  * simulate ten seconds in one blocking call and freeze the worker.
  */
 import * as Comlink from 'comlink';
-import { Led, loadHex, type Fault } from '@robo-journey/sim-core';
+import {
+  Led,
+  decodeUart,
+  loadHex,
+  type ChannelSpec,
+  type Fault,
+} from '@robo-journey/sim-core';
 import { buildCircuit, splitTerminal, type BuiltCircuit, type Project } from '@robo-journey/parts';
-import { EMPTY_SNAPSHOT, type SimApi, type SimSnapshot } from './protocol.ts';
+import {
+  EMPTY_SNAPSHOT,
+  type DecodedFrame,
+  type McuState,
+  type RegisterValue,
+  type SimApi,
+  type SimSnapshot,
+  type TraceData,
+} from './protocol.ts';
+
+/**
+ * I/O registers worth showing, with their bit names.
+ *
+ * Named rather than dumped as a hex range: `DDRB` with `DDB5` highlighted tells you the pin is an
+ * output, whereas `0x24 = 0x20` makes you go and look it up. Addresses and bit names are from the
+ * ATmega328P datasheet.
+ */
+const WATCHED_REGISTERS: { name: string; address: number; bits: string[] }[] = [
+  { name: 'PINB', address: 0x23, bits: ['PINB7', 'PINB6', 'PINB5', 'PINB4', 'PINB3', 'PINB2', 'PINB1', 'PINB0'] },
+  { name: 'DDRB', address: 0x24, bits: ['DDB7', 'DDB6', 'DDB5', 'DDB4', 'DDB3', 'DDB2', 'DDB1', 'DDB0'] },
+  { name: 'PORTB', address: 0x25, bits: ['PORTB7', 'PORTB6', 'PORTB5', 'PORTB4', 'PORTB3', 'PORTB2', 'PORTB1', 'PORTB0'] },
+  { name: 'PINC', address: 0x26, bits: [] },
+  { name: 'DDRC', address: 0x27, bits: [] },
+  { name: 'PORTC', address: 0x28, bits: [] },
+  { name: 'PIND', address: 0x29, bits: [] },
+  { name: 'DDRD', address: 0x2a, bits: [] },
+  { name: 'PORTD', address: 0x2b, bits: [] },
+  { name: 'TCCR0A', address: 0x44, bits: ['COM0A1', 'COM0A0', 'COM0B1', 'COM0B0', '-', '-', 'WGM01', 'WGM00'] },
+  { name: 'TCCR0B', address: 0x45, bits: ['FOC0A', 'FOC0B', '-', '-', 'WGM02', 'CS02', 'CS01', 'CS00'] },
+  { name: 'TCNT0', address: 0x46, bits: [] },
+  { name: 'ADMUX', address: 0x7c, bits: ['REFS1', 'REFS0', 'ADLAR', '-', 'MUX3', 'MUX2', 'MUX1', 'MUX0'] },
+  { name: 'ADCSRA', address: 0x7a, bits: ['ADEN', 'ADSC', 'ADATE', 'ADIF', 'ADIE', 'ADPS2', 'ADPS1', 'ADPS0'] },
+  { name: 'UCSR0A', address: 0xc0, bits: ['RXC0', 'TXC0', 'UDRE0', 'FE0', 'DOR0', 'UPE0', 'U2X0', 'MPCM0'] },
+  { name: 'UCSR0B', address: 0xc1, bits: ['RXCIE0', 'TXCIE0', 'UDRIE0', 'RXEN0', 'TXEN0', 'UCSZ02', 'RXB80', 'TXB80'] },
+  { name: 'UBRR0L', address: 0xc4, bits: [] },
+  { name: 'UBRR0H', address: 0xc5, bits: [] },
+];
 
 /** Target frame interval, milliseconds. */
 const TICK_MS = 16;
@@ -135,6 +177,83 @@ class Simulation implements SimApi {
       faults: board.faults as Fault[],
       serial,
       problems: [...problems, ...this.runtimeProblems],
+    };
+  }
+
+  channels(): ChannelSpec[] {
+    return this.built?.board.recorder.specs() ?? [];
+  }
+
+  watchAnalog(label: string): void {
+    this.built?.board.watchAnalog(label);
+  }
+
+  traces(ids: string[], from: number, to: number, maxPoints = 4000): TraceData[] {
+    const recorder = this.built?.board.recorder;
+    if (!recorder) return [];
+
+    const out: TraceData[] = [];
+    for (const id of ids) {
+      const window = recorder.window(id, from, to, maxPoints);
+      if (!window) continue;
+      out.push({
+        id: window.id,
+        label: window.label,
+        kind: window.kind,
+        // Typed arrays would be cloned as objects across the worker boundary; uPlot wants plain
+        // arrays anyway, so convert once here rather than every frame in the UI.
+        times: Array.from(window.times),
+        values: Array.from(window.values),
+      });
+    }
+    return out;
+  }
+
+  captureSpan(): { from: number; to: number } {
+    return this.built?.board.recorder.span() ?? { from: 0, to: 0 };
+  }
+
+  decodeSerial(id: string, from: number, to: number): DecodedFrame[] {
+    const board = this.built?.board;
+    if (!board) return [];
+
+    // High point cap: decoding needs every recorded edge, and decimating would drop bits.
+    const window = board.recorder.window(id, from, to, 1_000_000);
+    if (!window) return [];
+
+    const baud = Math.round(board.mcu.baudRate);
+    if (!Number.isFinite(baud) || baud <= 0) return [];
+
+    return decodeUart(window, { baud }).map((frame) => ({
+      startTime: frame.startTime,
+      endTime: frame.endTime,
+      byte: frame.byte,
+      framingError: frame.framingError,
+    }));
+  }
+
+  mcuState(): McuState {
+    const board = this.built?.board;
+    if (!board) {
+      return { pc: 0, stackPointer: 0, sreg: 0, cycles: 0, registers: [], gpr: [] };
+    }
+
+    const cpu = board.mcu.cpu;
+    const registers: RegisterValue[] = WATCHED_REGISTERS.map((spec) => ({
+      name: spec.name,
+      address: spec.address,
+      value: cpu.data[spec.address] ?? 0,
+      bits: spec.bits,
+    }));
+
+    return {
+      // avr8js counts the PC in words; a disassembly listing and avr-objdump both use bytes.
+      pc: cpu.pc * 2,
+      stackPointer: cpu.SP,
+      sreg: cpu.SREG,
+      cycles: cpu.cycles,
+      registers,
+      gpr: Array.from(cpu.data.subarray(0, 32)),
     };
   }
 

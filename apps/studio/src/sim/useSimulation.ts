@@ -7,10 +7,11 @@
  * messages.
  */
 import * as Comlink from 'comlink';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import type { ChannelSpec } from '@robo-journey/sim-core';
 import type { Project } from '@robo-journey/parts';
 import { useStudio } from '../store.ts';
-import type { SimApi } from './protocol.ts';
+import type { DecodedFrame, McuState, SimApi, TraceData } from './protocol.ts';
 
 /**
  * A fingerprint of everything about a project that changes the *circuit*.
@@ -34,6 +35,14 @@ export interface SimulationController {
   stepTime(seconds: number): void;
   load(project: Project, hex: string): void;
   setPartProp(partId: string, key: string, value: unknown): void;
+
+  // Queries. These return promises because the engine lives in a worker.
+  channels(): Promise<ChannelSpec[]>;
+  watchAnalog(label: string): void;
+  traces(ids: string[], from: number, to: number, maxPoints?: number): Promise<TraceData[]>;
+  captureSpan(): Promise<{ from: number; to: number }>;
+  decodeSerial(id: string, from: number, to: number): Promise<DecodedFrame[]>;
+  mcuState(): Promise<McuState>;
 }
 
 export function useSimulation(): SimulationController {
@@ -97,7 +106,29 @@ export function useSimulation(): SimulationController {
     void (api[method] as (...a: unknown[]) => Promise<unknown>)(...args);
   }, []);
 
-  return {
+  /** Query the worker, returning a safe default when it is not up yet. */
+  const query = useCallback(
+    async <T,>(run: (api: Comlink.Remote<SimApi>) => Promise<T>, fallback: T): Promise<T> => {
+      const api = apiRef.current;
+      if (!api) return fallback;
+      try {
+        return await run(api);
+      } catch {
+        // A query racing a worker teardown is not worth surfacing; the next poll will succeed.
+        return fallback;
+      }
+    },
+    [],
+  );
+
+  /**
+   * Memoised so the controller is referentially stable.
+   *
+   * Without this every render produces a new object, which invalidates any memo keyed on it --
+   * dockview would tear down and rebuild every panel on each render, and the scope's polling
+   * effect would restart continuously.
+   */
+  return useMemo<SimulationController>(() => ({
     start: () => call('start'),
     pause: () => call('pause'),
     reset: () => call('reset'),
@@ -110,5 +141,21 @@ export function useSimulation(): SimulationController {
       call('load', loaded, hex);
     },
     setPartProp: (partId, key, value) => call('setPartProp', partId, key, value),
-  };
+
+    channels: () => query((api) => api.channels(), []),
+    watchAnalog: (label) => call('watchAnalog', label),
+    traces: (ids, from, to, maxPoints) =>
+      query((api) => api.traces(ids, from, to, maxPoints), []),
+    captureSpan: () => query((api) => api.captureSpan(), { from: 0, to: 0 }),
+    decodeSerial: (id, from, to) => query((api) => api.decodeSerial(id, from, to), []),
+    mcuState: () =>
+      query((api) => api.mcuState(), {
+        pc: 0,
+        stackPointer: 0,
+        sreg: 0,
+        cycles: 0,
+        registers: [],
+        gpr: [],
+      }),
+  }), [call, query]);
 }

@@ -14,7 +14,7 @@ import {
   type IDockviewPanelProps,
 } from 'dockview-react';
 import 'dockview/dist/styles/dockview.css';
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Toolbar } from './Toolbar.tsx';
 import { theme } from './theme.ts';
 import { useSimulation } from './sim/useSimulation.ts';
@@ -23,17 +23,26 @@ import { EditorPanel } from './panels/Editor.tsx';
 import { SerialPanel } from './panels/Serial.tsx';
 import { ProblemsPanel } from './panels/Problems.tsx';
 import { PalettePanel } from './panels/Palette.tsx';
-
-const components = {
-  workspace: (_props: IDockviewPanelProps) => <WorkspacePanel />,
-  editor: (_props: IDockviewPanelProps) => <EditorPanel />,
-  serial: (_props: IDockviewPanelProps) => <SerialPanel />,
-  problems: (_props: IDockviewPanelProps) => <ProblemsPanel />,
-  palette: (_props: IDockviewPanelProps) => <PalettePanel />,
-};
+import { ScopePanel } from './panels/Scope.tsx';
+import { InspectorPanel } from './panels/Inspector.tsx';
 
 export function App() {
   const sim = useSimulation();
+
+  // Panels that need to query the worker take the controller. Defined inside the component so the
+  // controller is in scope; memoised so dockview does not remount every panel on each render.
+  const components = useMemo(
+    () => ({
+      workspace: (_props: IDockviewPanelProps) => <WorkspacePanel />,
+      editor: (_props: IDockviewPanelProps) => <EditorPanel />,
+      serial: (_props: IDockviewPanelProps) => <SerialPanel />,
+      problems: (_props: IDockviewPanelProps) => <ProblemsPanel />,
+      palette: (_props: IDockviewPanelProps) => <PalettePanel />,
+      scope: (_props: IDockviewPanelProps) => <ScopePanel sim={sim} />,
+      inspector: (_props: IDockviewPanelProps) => <InspectorPanel sim={sim} />,
+    }),
+    [sim],
+  );
 
   /**
    * Default layout: canvas centre stage, palette left, code right, diagnostics below.
@@ -85,6 +94,20 @@ export function App() {
       id: 'serial',
       component: 'serial',
       title: 'Serial Monitor',
+      position: { referencePanel: problems, direction: 'within' },
+    });
+
+    event.api.addPanel({
+      id: 'scope',
+      component: 'scope',
+      title: 'Scope',
+      position: { referencePanel: problems, direction: 'within' },
+    });
+
+    event.api.addPanel({
+      id: 'inspector',
+      component: 'inspector',
+      title: 'MCU',
       position: { referencePanel: problems, direction: 'within' },
     });
 
