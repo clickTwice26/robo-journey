@@ -21,6 +21,7 @@ import {
   SUPPLY_ABSOLUTE_MAX_CURRENT,
 } from '../mcu/pin-model.js';
 import { type Fault, fault, formatCurrent, formatVoltage } from '../faults/index.js';
+import { SignalRecorder } from '../instruments/recorder.js';
 
 export interface BoardOptions extends Atmega328pOptions {
   /** Supply voltage. 5 V for a classic Uno, 3.3 V for a 3V3 board. */
@@ -33,7 +34,16 @@ export interface BoardOptions extends Atmega328pOptions {
    * fresh voltages. 100 us is well under the ADC's ~104 us conversion.
    */
   readonly maxAnalogInterval?: number;
+  /** Samples retained per recorded channel. */
+  readonly captureDepth?: number;
 }
+
+/** Channel id for a pin's logic level. */
+export const digitalChannel = (label: string): string => `digital:${label}`;
+/** Channel id for a pin's voltage. */
+export const analogChannel = (label: string): string => `analog:${label}`;
+/** Channel id for total supply current. */
+export const SUPPLY_CURRENT_CHANNEL = 'analog:VCC-current';
 
 const DEFAULT_SUPPLY_VOLTS = 5;
 const DEFAULT_MAX_ANALOG_INTERVAL = 100e-6;
@@ -57,6 +67,15 @@ export class Board {
   /** Simulated time of the last analog solve, seconds. */
   private lastSolveTime = 0;
   private detectedFaults: Fault[] = [];
+
+  /**
+   * Signal capture for the scope and logic analyser.
+   *
+   * Every pin is recorded digitally from the start: transitions are deduplicated, so a pin sitting
+   * high costs nothing and a blinking one costs two samples a second. Analog traces are opt-in via
+   * `watchAnalog`, because they store a sample per solve and would fill the buffer in seconds.
+   */
+  readonly recorder: SignalRecorder;
   /**
    * Faults that have occurred at any point since reset, keyed by code and subject.
    *
@@ -85,7 +104,34 @@ export class Board {
       this.pinsByLocation.push({ pin, location });
     }
 
+    this.recorder = new SignalRecorder(
+      options.captureDepth !== undefined ? { capacity: options.captureDepth } : {},
+    );
+    for (const location of UNO_PINS) {
+      this.recorder.addChannel({
+        id: digitalChannel(location.label),
+        kind: 'digital',
+        label: location.label,
+      });
+    }
+
     this.mcu.onPinChange(() => {
+      this.pinsDirty = true;
+    });
+
+    // Enabling the transmitter hands the TX pin to the USART and takes the line to idle high.
+    // That is a drive-state change like any other, but it happens through a control register
+    // rather than a port write, so the GPIO listener never sees it. Without forcing a solve here
+    // the line is still recorded as whatever it was before -- and since a tri-stated pin sits near
+    // 0 V, the idle-high period is missed entirely and the very next start bit has no falling edge
+    // to be seen at. The first character then decodes as garbage.
+    this.mcu.usart.onConfigurationChange = () => {
+      this.pinsDirty = true;
+    };
+
+    // A byte reaching UDR starts a frame on the very next cycle. Solve now so the start bit's
+    // falling edge is captured at its true time rather than at the next interval tick.
+    this.mcu.onSerialByte(() => {
       this.pinsDirty = true;
     });
   }
@@ -154,7 +200,20 @@ export class Board {
         1,
         Math.round(this.maxAnalogInterval * this.mcu.clockHz),
       );
-      const checkpoint = Math.min(this.mcu.cycles + intervalCycles, targetCycle);
+
+      // Stop at the next serial bit edge as well as the interval. At 9600 baud a bit lasts 104 us
+      // against a 100 us ceiling, so relying on the interval alone would sample roughly once per
+      // bit -- nowhere near enough to decode, and the edges would land wherever the tick fell
+      // rather than where the UART put them.
+      const txEdge = this.mcu.transmitterEnabled
+        ? this.mcu.usartTx.nextEdgeCycle(this.mcu.cycles)
+        : null;
+
+      const checkpoint = Math.min(
+        this.mcu.cycles + intervalCycles,
+        txEdge !== null && txEdge > this.mcu.cycles ? txEdge : Number.POSITIVE_INFINITY,
+        targetCycle,
+      );
 
       this.pinsDirty = false;
       while (this.mcu.cycles < checkpoint && !this.pinsDirty) {
@@ -166,6 +225,31 @@ export class Board {
     }
   }
 
+  /**
+   * Start recording a pin's voltage as an analog trace.
+   *
+   * Opt-in: an analog channel keeps every solve, so twenty of them running unwatched would be the
+   * largest thing in the worker.
+   */
+  watchAnalog(label: string): void {
+    const pin = this.pins.get(label.toUpperCase());
+    if (!pin) throw new Error(`Unknown pin "${label}"`);
+    this.recorder.addChannel({
+      id: analogChannel(label.toUpperCase()),
+      kind: 'analog',
+      label: `${label.toUpperCase()} (V)`,
+    });
+  }
+
+  /** Start recording total supply current. */
+  watchSupplyCurrent(): void {
+    this.recorder.addChannel({
+      id: SUPPLY_CURRENT_CHANNEL,
+      kind: 'analog',
+      label: 'VCC current (A)',
+    });
+  }
+
   /** Reset the MCU and the circuit to their power-on states. */
   reset(): void {
     this.mcu.cpu.reset();
@@ -174,6 +258,8 @@ export class Board {
     this.pinsDirty = true;
     this.detectedFaults = [];
     this.latchedFaults.clear();
+    this.recorder.clear();
+    this.mcu.usartTx.reset();
   }
 
   // -------------------------------------------------------------------------------------------
@@ -223,8 +309,37 @@ export class Board {
       }
     }
 
-    // 4. Look for damage.
+    // 4. Capture, before faults, so a trace exists for whatever the fault is about.
+    this.record();
+
+    // 5. Look for damage.
     this.detectFaults();
+  }
+
+  /**
+   * Record every watched channel at the current time.
+   *
+   * Called from the solve, not from a timer: the solver already runs the instant a pin changes, so
+   * an edge lands in the buffer at its exact time rather than at the next tick of a sample clock.
+   * That is what lets the decoder read a 115200-baud frame off the trace.
+   */
+  private record(): void {
+    const time = this.mcu.time;
+    const vcc = this.supplyVolts;
+
+    // A real logic analyser has one fixed threshold, typically half the rail -- it does not share
+    // the MCU's Schmitt hysteresis. Thresholding here rather than calling `latchedLevel` also
+    // keeps recording free of side effects: that method updates the pin's held level, and driving
+    // it from the recorder would corrupt what the chip reads back.
+    const logicThreshold = vcc / 2;
+
+    for (const { pin, location } of this.pinsByLocation) {
+      const voltage = this.circuit.voltage(pin.node);
+      this.recorder.sample(digitalChannel(location.label), time, voltage > logicThreshold ? 1 : 0);
+      this.recorder.sample(analogChannel(location.label), time, voltage);
+    }
+
+    this.recorder.sample(SUPPLY_CURRENT_CHANNEL, time, this.supplyCurrent);
   }
 
   private detectFaults(): void {

@@ -108,3 +108,25 @@ export type {
   RailPolarity,
   RailSide,
 } from './netlist/breadboard.js';
+
+// --- Instruments --------------------------------------------------------------------------------
+
+export { SignalRecorder } from './instruments/recorder.js';
+export type {
+  ChannelKind,
+  ChannelSpec,
+  ChannelWindow,
+  Edge,
+  RecorderOptions,
+} from './instruments/recorder.js';
+
+export { decodeUart, framesToText, levelAt } from './instruments/decode.js';
+export type { UartFrame, UartOptions } from './instruments/decode.js';
+
+export {
+  SUPPLY_CURRENT_CHANNEL,
+  analogChannel,
+  digitalChannel,
+} from './sched/board.js';
+
+export { UsartTxLine } from './mcu/usart-tx.js';

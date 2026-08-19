@@ -36,6 +36,7 @@ import {
   watchdogConfig,
 } from 'avr8js';
 import { UNO_PINS, type PinLocation, type PortId } from './pin-map.js';
+import { UsartTxLine } from './usart-tx.js';
 
 /** Stock Arduino Uno clock. */
 export const UNO_CLOCK_HZ = 16_000_000;
@@ -43,6 +44,20 @@ export const UNO_CLOCK_HZ = 16_000_000;
 /** ATmega328P: 2 KiB SRAM, 1 KiB EEPROM. */
 const SRAM_BYTES = 2 * 1024;
 const EEPROM_BYTES = 1024;
+
+/** USART register addresses, so the baud rate can be read the way the hardware derives it. */
+const UCSR0A = 0xc0;
+const UCSR0B = 0xc1;
+const UCSR0C = 0xc2;
+const UBRR0L = 0xc4;
+const UBRR0H = 0xc5;
+
+/** UCSR0A bit 1: double speed, which halves the divisor. */
+const U2X0 = 0x02;
+/** UCSR0B bit 3: transmitter enabled. Until this is set the USART does not own the TX pin. */
+const TXEN0 = 0x08;
+/** UCSR0C bits 2:1 select character size together with UCSZ02 in UCSR0B. */
+const UCSZ0_MASK = 0x06;
 
 /**
  * How a pin is driving the outside world, resolved from the DDR and PORT register bits.
@@ -111,6 +126,15 @@ export class Atmega328p {
   readonly clock: AVRClock;
   readonly watchdog: AVRWatchdog;
 
+  /**
+   * Synthesised TX waveform.
+   *
+   * avr8js models the USART behaviourally and never drives the pin, so the line is reconstructed
+   * here from UBRR and the frame the peripheral reports. Without it a logic analyser sees nothing
+   * on D1 and a baud mismatch -- the most common serial fault there is -- cannot be observed.
+   */
+  readonly usartTx = new UsartTxLine();
+
   private readonly ports: Record<PortId, AVRIOPort>;
   private readonly pinListeners = new Set<PinChangeListener>();
   private readonly serialListeners = new Set<SerialListener>();
@@ -146,6 +170,7 @@ export class Atmega328p {
 
     this.attachPortListeners();
     this.usart.onByteTransmit = (byte: number) => {
+      this.usartTx.transmit(byte, this.cpu.cycles, this.bitCycles, this.characterSize);
       for (const listener of this.serialListeners) listener(byte);
     };
 
@@ -162,10 +187,50 @@ export class Atmega328p {
     return this.cpu.cycles / this.clockHz;
   }
 
-  /** Current drive state of a pin, by silkscreen label. */
+  /** True once the sketch has enabled the transmitter, at which point the USART owns TX. */
+  get transmitterEnabled(): boolean {
+    return (this.cpu.data[UCSR0B]! & TXEN0) !== 0;
+  }
+
+  /**
+   * CPU cycles per bit, from the datasheet's baud formula.
+   *
+   * `BAUD = F_CPU / (multiplier * (UBRR + 1))`, so one bit lasts `multiplier * (UBRR + 1)` cycles.
+   * Read from the registers rather than from the peripheral's internals, because that is what the
+   * hardware does and it stays correct if a sketch writes UBRR directly.
+   */
+  get bitCycles(): number {
+    const ubrr = ((this.cpu.data[UBRR0H]! & 0x0f) << 8) | this.cpu.data[UBRR0L]!;
+    const multiplier = this.cpu.data[UCSR0A]! & U2X0 ? 8 : 16;
+    return multiplier * (ubrr + 1);
+  }
+
+  /** Effective baud rate, for the analyser's decoder. */
+  get baudRate(): number {
+    return this.clockHz / this.bitCycles;
+  }
+
+  /** Character size in bits. 5-8 from UCSZ0:1; 9-bit mode needs UCSZ02 and is rare. */
+  get characterSize(): number {
+    return 5 + ((this.cpu.data[UCSR0C]! & UCSZ0_MASK) >> 1);
+  }
+
+  /**
+   * Current drive state of a pin, by silkscreen label.
+   *
+   * TX is special: once the transmitter is enabled the USART overrides the port register for that
+   * pin, exactly as the datasheet's pin-override table says. Reporting PORTD1 there instead would
+   * show a line that never moves.
+   */
   pinState(label: string): PinDriveState {
-    const pin = UNO_PINS.find((p) => p.label === label.toUpperCase());
+    const upper = label.toUpperCase();
+    const pin = UNO_PINS.find((p) => p.label === upper);
     if (!pin) throw new Error(`Unknown pin "${label}"`);
+
+    if (upper === 'D1' && this.transmitterEnabled) {
+      return this.usartTx.levelAt(this.cpu.cycles) ? 'high' : 'low';
+    }
+
     return toDriveState(this.ports[pin.port].pinState(pin.bit));
   }
 
