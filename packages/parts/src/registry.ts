@@ -84,41 +84,77 @@ const BREADBOARD_HALF: PartDefinition = {
  * devices. Pin positions follow the real header spacing, including the notorious 0.05" offset
  * between D7 and D8 that stops standard 0.1" protoboard sitting flat.
  */
+/**
+ * Arduino Uno R3.
+ *
+ * Handled specially by the builder: the board brings its own MCU, supply and per-pin electrical
+ * models, so this definition exists for the canvas -- artwork size and header geometry -- rather
+ * than to build devices.
+ *
+ * Positions follow the real R3 header layout, including the 0.16" jog between D7 and D8 that stops
+ * standard 0.1" protoboard sitting flat on an Uno. The canvas draws its sockets straight from this
+ * list, so the artwork and the netlist cannot drift apart.
+ */
+const UNO_PIN_PITCH = PITCH_MM;
+/** y of the digital header, from the top edge. */
+const UNO_TOP_Y = 2.0;
+/** y of the power and analog headers, from the top edge. */
+const UNO_BOTTOM_Y = 51.4;
+
+/** Digital header, right bank: D8..D13 plus GND and AREF, laid out right to left. */
+const UNO_DIGITAL_HIGH = ['AREF', 'GND3', 'D13', 'D12', 'D11', 'D10', 'D9', 'D8'];
+/** Digital header, left bank: D0..D7. */
+const UNO_DIGITAL_LOW = ['D7', 'D6', 'D5', 'D4', 'D3', 'D2', 'D1', 'D0'];
+/** Power header, left to right. */
+const UNO_POWER = ['IOREF', 'RESET', '3V3', '5V', 'GND', 'GND2', 'VIN'];
+/** Analog header, left to right. */
+const UNO_ANALOG = ['A0', 'A1', 'A2', 'A3', 'A4', 'A5'];
+
+/** Silkscreen text, where it differs from the terminal name. */
+const UNO_LABELS: Record<string, string> = {
+  GND: 'GND',
+  GND2: 'GND',
+  GND3: 'GND',
+  '3V3': '3V3',
+  D0: 'RX0',
+  D1: 'TX1',
+};
+
+function unoPins(): PartPin[] {
+  const pins: PartPin[] = [];
+
+  // Right bank runs leftward from x = 60.96 (AREF nearest the right edge).
+  UNO_DIGITAL_HIGH.forEach((name, i) => {
+    pins.push({ name, x: 60.96 - i * UNO_PIN_PITCH, y: UNO_TOP_Y, label: UNO_LABELS[name] ?? name });
+  });
+  // Left bank starts after the 0.16" jog: D7 sits 3.81 mm left of D8, not 2.54.
+  const d8x = 60.96 - (UNO_DIGITAL_HIGH.length - 1) * UNO_PIN_PITCH;
+  UNO_DIGITAL_LOW.forEach((name, i) => {
+    pins.push({
+      name,
+      x: d8x - 3.81 - i * UNO_PIN_PITCH,
+      y: UNO_TOP_Y,
+      label: UNO_LABELS[name] ?? name,
+    });
+  });
+
+  UNO_POWER.forEach((name, i) => {
+    pins.push({ name, x: 16.51 + i * UNO_PIN_PITCH, y: UNO_BOTTOM_Y, label: UNO_LABELS[name] ?? name });
+  });
+  UNO_ANALOG.forEach((name, i) => {
+    pins.push({ name, x: 39.37 + i * UNO_PIN_PITCH, y: UNO_BOTTOM_Y, label: name });
+  });
+
+  return pins;
+}
+
 const ARDUINO_UNO: PartDefinition = {
   type: 'arduino-uno',
   label: 'Arduino Uno',
   category: 'board',
   width: 68.6,
   height: 53.4,
-  pins: [
-    // Digital header, right to left along the top edge.
-    ...['D13', 'D12', 'D11', 'D10', 'D9', 'D8'].map((name, i) => ({
-      name,
-      x: 62.0 - i * PITCH_MM,
-      y: 2.5,
-      label: name,
-    })),
-    ...['D7', 'D6', 'D5', 'D4', 'D3', 'D2', 'D1', 'D0'].map((name, i) => ({
-      name,
-      // The real 0.05" jog between the two digital banks.
-      x: 43.2 - i * PITCH_MM,
-      y: 2.5,
-      label: name,
-    })),
-    // Analog header along the bottom edge.
-    ...['A0', 'A1', 'A2', 'A3', 'A4', 'A5'].map((name, i) => ({
-      name,
-      x: 40.6 + i * PITCH_MM,
-      y: 50.9,
-      label: name,
-    })),
-    // Power header.
-    { name: '5V', x: 25.4, y: 50.9, label: '5V' },
-    { name: '3V3', x: 22.9, y: 50.9, label: '3.3V' },
-    { name: 'GND', x: 30.5, y: 50.9, label: 'GND' },
-    { name: 'GND2', x: 33.0, y: 50.9, label: 'GND' },
-    { name: 'VIN', x: 35.6, y: 50.9, label: 'VIN' },
-  ],
+  pins: unoPins(),
   defaults: {},
 };
 

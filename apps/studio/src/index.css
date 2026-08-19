@@ -1,0 +1,20 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* dockview ships light defaults; align its chrome with the MUI dark theme. */
+.dockview-theme-abyss {
+  --dv-background-color: #14161a;
+  --dv-group-view-background-color: #1b1e24;
+  --dv-tabs-and-actions-container-background-color: #14161a;
+  --dv-activegroup-visiblepanel-tab-background-color: #1b1e24;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #14161a;
+  --dv-tab-divider-color: #2a2f38;
+  --dv-separator-border: #2a2f38;
+  --dv-paneview-header-border-color: #2a2f38;
+  height: 100%;
+}

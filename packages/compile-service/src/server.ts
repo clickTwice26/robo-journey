@@ -5,7 +5,12 @@
  * gets firmware back. The desktop build calls `ArduinoCompiler` directly and never starts a server.
  */
 import Fastify from 'fastify';
-import { ArduinoCompiler, type CompileRequest, type CompileResult } from './compiler.js';
+import {
+  ArduinoCompiler,
+  ToolchainUnavailableError,
+  type CompileRequest,
+  type CompileResult,
+} from './compiler.js';
 
 const PORT = Number(process.env.PORT ?? 4747);
 const HOST = process.env.HOST ?? '127.0.0.1';
@@ -47,7 +52,10 @@ export function createServer(compiler = new ArduinoCompiler()) {
       });
     } catch (error) {
       request.log.error(error);
-      return reply.status(500).send({ error: (error as Error).message });
+      // 503, not 500: the service is fine, the toolchain behind it is not, and the client should
+      // say so rather than reporting a generic failure.
+      const status = error instanceof ToolchainUnavailableError ? 503 : 500;
+      return reply.status(status).send({ error: (error as Error).message });
     }
   });
 

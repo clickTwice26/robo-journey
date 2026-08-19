@@ -43,6 +43,34 @@ export interface CompileResult {
 
 export class CompileError extends Error {}
 
+/**
+ * The toolchain itself is unavailable, as distinct from the sketch failing to compile.
+ *
+ * Worth its own type because the remedy is completely different: a compile error means fix your
+ * code, this means start Docker. Reporting the raw daemon error as a sketch diagnostic -- which is
+ * what happened the first time this occurred -- puts an unactionable message on line 1 of a file
+ * that is perfectly fine.
+ */
+export class ToolchainUnavailableError extends CompileError {
+  constructor(detail: string) {
+    super(
+      'The compile toolchain is unavailable. Docker does not appear to be running -- start ' +
+        `Docker Desktop and try again.\n\nDetail: ${detail}`,
+    );
+    this.name = 'ToolchainUnavailableError';
+  }
+}
+
+/** Signatures of a Docker daemon that is not reachable, as opposed to a build that failed. */
+function looksLikeDockerDown(stderr: string): boolean {
+  return (
+    /cannot connect to the docker daemon/i.test(stderr) ||
+    /failed to connect to the docker API/i.test(stderr) ||
+    /is the docker daemon running/i.test(stderr) ||
+    /docker: command not found/i.test(stderr)
+  );
+}
+
 /** Stable hash over the sketch sources plus the target board. */
 export function hashRequest(request: CompileRequest): string {
   const hash = createHash('sha256');
@@ -70,7 +98,15 @@ function run(command: string, args: readonly string[]): Promise<ProcessResult> {
     let stderr = '';
     child.stdout.on('data', (c: Buffer) => (stdout += c.toString('utf8')));
     child.stderr.on('data', (c: Buffer) => (stderr += c.toString('utf8')));
-    child.on('error', reject);
+    // ENOENT here means the binary itself is missing (no docker, no arduino-cli), which is a
+    // toolchain problem rather than a build failure.
+    child.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') {
+        reject(new ToolchainUnavailableError(`\`${command}\` is not installed or not on PATH`));
+        return;
+      }
+      reject(error);
+    });
     child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }));
   });
 }
@@ -133,7 +169,11 @@ export class ArduinoCompiler {
 
       if (result.code !== 0 || hasErrors(diagnostics)) {
         if (result.code !== 0 && diagnostics.length === 0) {
-          // No parseable diagnostics and a non-zero exit means the tool itself failed.
+          // No parseable diagnostics and a non-zero exit means the tool itself failed, not the
+          // sketch. Separate the "Docker is down" case so the user is told what to actually do.
+          if (looksLikeDockerDown(result.stderr)) {
+            throw new ToolchainUnavailableError(result.stderr.trim().split('\n')[0] ?? '');
+          }
           throw new CompileError(
             `arduino-cli exited ${result.code} without diagnostics:\n${result.stderr.trim()}`,
           );

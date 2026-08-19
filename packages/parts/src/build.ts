@@ -29,7 +29,7 @@ import { terminalId, type Project } from './project.js';
 const CONNECTION_OHMS = 1e-3;
 
 /** The Uno pins that are supply rails rather than GPIO. */
-const UNO_GROUND_PINS = ['GND', 'GND2'];
+const UNO_GROUND_PINS = ['GND', 'GND2', 'GND3'];
 const UNO_SUPPLY_PINS: Record<string, 'vcc'> = { '5V': 'vcc' };
 
 export interface BuiltCircuit {

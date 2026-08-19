@@ -26,3 +26,6 @@ export {
   terminalId,
 } from './project.js';
 export type { PartInstance, Project, SketchFile, Wire } from './project.js';
+
+export { EXAMPLES, exampleById } from './examples.js';
+export type { Example } from './examples.js';
