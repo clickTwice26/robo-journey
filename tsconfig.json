@@ -1,0 +1,7 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/sim-core" },
+    { "path": "./packages/compile-service" }
+  ]
+}

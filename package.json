@@ -1,0 +1,31 @@
+{
+  "name": "robo-journey",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A hardware-accurate Arduino circuit simulator \u2014 real firmware execution on an emulated ATmega328P, coupled to a real analog circuit solver.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc --build packages/sim-core packages/compile-service",
+    "clean": "rm -rf packages/*/dist packages/*/*.tsbuildinfo",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --build packages/sim-core packages/compile-service && npm run typecheck:tests",
+    "typecheck:tests": "tsc -p packages/sim-core/tsconfig.test.json && tsc -p packages/compile-service/tsconfig.test.json",
+    "verify": "npm run typecheck && npm run test",
+    "image:build": "npm run image:build -w @robo-journey/compile-service",
+    "fixtures:build": "npm run fixtures:build -w @robo-journey/compile-service"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.11"
+  }
+}

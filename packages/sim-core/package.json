@@ -1,0 +1,25 @@
+{
+  "name": "@robo-journey/sim-core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Framework-agnostic simulation engine: AVR core binding, analog solver, co-simulation scheduler. No DOM, no React.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "dependencies": {
+    "avr8js": "^0.21.0"
+  },
+  "devDependencies": {
+    "ml-matrix": "^6.15.0"
+  }
+}
