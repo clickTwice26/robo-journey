@@ -130,3 +130,9 @@ export {
 } from './sched/board.js';
 
 export { UsartTxLine } from './mcu/usart-tx.js';
+
+// --- Debugger -----------------------------------------------------------------------------------
+
+export { decode, disassemble, indexByAddress } from './debug/disassemble.js';
+export type { DisasmLine, DisassembleOptions } from './debug/disassemble.js';
+export { DATA_SPACE, IO_SPACE, dataName, ioName } from './debug/io-registers.js';

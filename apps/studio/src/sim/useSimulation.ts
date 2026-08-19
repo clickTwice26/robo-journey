@@ -8,7 +8,7 @@
  */
 import * as Comlink from 'comlink';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import type { ChannelSpec } from '@robo-journey/sim-core';
+import type { ChannelSpec, DisasmLine } from '@robo-journey/sim-core';
 import type { Project } from '@robo-journey/parts';
 import { useStudio } from '../store.ts';
 import type { DecodedFrame, McuState, SimApi, TraceData } from './protocol.ts';
@@ -43,6 +43,11 @@ export interface SimulationController {
   captureSpan(): Promise<{ from: number; to: number }>;
   decodeSerial(id: string, from: number, to: number): Promise<DecodedFrame[]>;
   mcuState(): Promise<McuState>;
+  disassembly(from: number, to: number): Promise<DisasmLine[]>;
+  setBreakpoint(byteAddress: number): void;
+  clearBreakpoint(byteAddress: number): void;
+  clearBreakpoints(): void;
+  breakpoints(): Promise<number[]>;
 }
 
 export function useSimulation(): SimulationController {
@@ -157,5 +162,11 @@ export function useSimulation(): SimulationController {
         registers: [],
         gpr: [],
       }),
+
+    disassembly: (from, to) => query((api) => api.disassembly(from, to), []),
+    setBreakpoint: (byteAddress) => call('setBreakpoint', byteAddress),
+    clearBreakpoint: (byteAddress) => call('clearBreakpoint', byteAddress),
+    clearBreakpoints: () => call('clearBreakpoints'),
+    breakpoints: () => query((api) => api.breakpoints(), []),
   }), [call, query]);
 }

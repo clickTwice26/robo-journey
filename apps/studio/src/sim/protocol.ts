@@ -5,7 +5,7 @@
  * no live references into the engine -- the UI reads a picture of the last frame and never touches
  * the solver, which is what lets the engine run flat out without the renderer stalling it.
  */
-import type { ChannelSpec, Fault } from '@robo-journey/sim-core';
+import type { ChannelSpec, DisasmLine, Fault } from '@robo-journey/sim-core';
 import type { Project } from '@robo-journey/parts';
 
 export interface SimSnapshot {
@@ -26,6 +26,8 @@ export interface SimSnapshot {
   readonly serial: string;
   /** Problems reported while building the circuit, e.g. an unknown part. */
   readonly problems: readonly string[];
+  /** Byte address execution is stopped at, when a breakpoint stopped it. */
+  readonly stoppedAt: number | null;
 }
 
 export const EMPTY_SNAPSHOT: SimSnapshot = {
@@ -39,6 +41,7 @@ export const EMPTY_SNAPSHOT: SimSnapshot = {
   faults: [],
   serial: '',
   problems: [],
+  stoppedAt: null,
 };
 
 /**
@@ -117,4 +120,11 @@ export interface SimApi {
   decodeSerial(id: string, from: number, to: number): DecodedFrame[];
   /** Current MCU registers and program counter. */
   mcuState(): McuState;
+
+  /** Disassemble a span of flash. Byte addresses throughout, as avr-objdump uses. */
+  disassembly(from: number, to: number): DisasmLine[];
+  setBreakpoint(byteAddress: number): void;
+  clearBreakpoint(byteAddress: number): void;
+  clearBreakpoints(): void;
+  breakpoints(): number[];
 }

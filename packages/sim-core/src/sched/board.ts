@@ -69,6 +69,18 @@ export class Board {
   private detectedFaults: Fault[] = [];
 
   /**
+   * Breakpoints, as a flag per flash word.
+   *
+   * A `Set` would be the obvious choice, but this is consulted after every instruction -- sixteen
+   * million times a simulated second -- and a typed-array index is a fraction of the cost of a
+   * hash lookup. `anyBreakpoints` skips the check entirely when none are set, which is the normal
+   * case and must stay free.
+   */
+  private readonly breakpointFlags: Uint8Array;
+  private anyBreakpoints = false;
+  private stoppedAt: number | null = null;
+
+  /**
    * Signal capture for the scope and logic analyser.
    *
    * Every pin is recorded digitally from the start: transitions are deduplicated, so a pin sitting
@@ -103,6 +115,8 @@ export class Board {
       this.pins.set(location.label, pin);
       this.pinsByLocation.push({ pin, location });
     }
+
+    this.breakpointFlags = new Uint8Array(options.progMem.length);
 
     this.recorder = new SignalRecorder(
       options.captureDepth !== undefined ? { capacity: options.captureDepth } : {},
@@ -189,6 +203,7 @@ export class Board {
    * requested span -- then re-solves the network and pushes the results back into the chip.
    */
   runFor(seconds: number): void {
+    this.stoppedAt = null;
     const targetCycle = this.mcu.cycles + Math.round(seconds * this.mcu.clockHz);
 
     // Establish an operating point before the first instruction, so the very first read sees a
@@ -216,13 +231,78 @@ export class Board {
       );
 
       this.pinsDirty = false;
-      while (this.mcu.cycles < checkpoint && !this.pinsDirty) {
-        this.mcu.step();
+      if (this.anyBreakpoints) {
+        while (this.mcu.cycles < checkpoint && !this.pinsDirty) {
+          this.mcu.step();
+          if (this.breakpointFlags[this.mcu.cpu.pc]) {
+            this.stoppedAt = this.mcu.cpu.pc * 2;
+            // Settle the circuit before returning, so the UI shows the state at the breakpoint
+            // rather than the state one solve behind it.
+            this.solveAnalog(Math.max(this.mcu.time - this.lastSolveTime, 0));
+            return;
+          }
+        }
+      } else {
+        while (this.mcu.cycles < checkpoint && !this.pinsDirty) {
+          this.mcu.step();
+        }
       }
 
       const dt = this.mcu.time - this.lastSolveTime;
       if (dt > 0) this.solveAnalog(dt);
     }
+  }
+
+  /**
+   * Set a breakpoint at a byte address.
+   *
+   * Byte addresses throughout, matching avr-objdump and the disassembly listing. Odd addresses are
+   * rounded down to the containing instruction word rather than rejected, because a listing click
+   * can land anywhere within a 32-bit instruction.
+   */
+  setBreakpoint(byteAddress: number): void {
+    const word = Math.floor(byteAddress / 2);
+    if (word < 0 || word >= this.breakpointFlags.length) return;
+    this.breakpointFlags[word] = 1;
+    this.anyBreakpoints = true;
+  }
+
+  clearBreakpoint(byteAddress: number): void {
+    const word = Math.floor(byteAddress / 2);
+    if (word < 0 || word >= this.breakpointFlags.length) return;
+    this.breakpointFlags[word] = 0;
+    this.anyBreakpoints = this.breakpointFlags.some((flag) => flag === 1);
+  }
+
+  clearBreakpoints(): void {
+    this.breakpointFlags.fill(0);
+    this.anyBreakpoints = false;
+  }
+
+  /** Breakpoint byte addresses currently set. */
+  get breakpoints(): number[] {
+    const out: number[] = [];
+    for (let word = 0; word < this.breakpointFlags.length; word++) {
+      if (this.breakpointFlags[word]) out.push(word * 2);
+    }
+    return out;
+  }
+
+  /** Byte address execution stopped at, or null if it was not a breakpoint that stopped it. */
+  get stoppedAtBreakpoint(): number | null {
+    return this.stoppedAt;
+  }
+
+  /**
+   * Execute one instruction, ignoring breakpoints.
+   *
+   * Stepping off a breakpoint has to be possible, so the check is skipped for exactly one
+   * instruction -- otherwise the debugger stops on the line it is already stopped at, forever.
+   */
+  stepInstruction(): void {
+    this.stoppedAt = null;
+    this.mcu.step();
+    this.solveAnalog(Math.max(this.mcu.time - this.lastSolveTime, 0));
   }
 
   /**
@@ -260,6 +340,7 @@ export class Board {
     this.latchedFaults.clear();
     this.recorder.clear();
     this.mcu.usartTx.reset();
+    this.stoppedAt = null;
   }
 
   // -------------------------------------------------------------------------------------------
@@ -270,6 +351,7 @@ export class Board {
    * @param dt Simulated seconds since the previous solve. Zero requests a DC operating point.
    */
   private solveAnalog(dt: number): void {
+    if (dt < 0) return;
     let driveChanged = false;
 
     // 1. MCU port registers become electrical stamps.

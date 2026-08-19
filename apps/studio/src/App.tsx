@@ -25,6 +25,7 @@ import { ProblemsPanel } from './panels/Problems.tsx';
 import { PalettePanel } from './panels/Palette.tsx';
 import { ScopePanel } from './panels/Scope.tsx';
 import { InspectorPanel } from './panels/Inspector.tsx';
+import { DisassemblyPanel } from './panels/Disassembly.tsx';
 
 export function App() {
   const sim = useSimulation();
@@ -40,6 +41,7 @@ export function App() {
       palette: (_props: IDockviewPanelProps) => <PalettePanel />,
       scope: (_props: IDockviewPanelProps) => <ScopePanel sim={sim} />,
       inspector: (_props: IDockviewPanelProps) => <InspectorPanel sim={sim} />,
+      disassembly: (_props: IDockviewPanelProps) => <DisassemblyPanel sim={sim} />,
     }),
     [sim],
   );
@@ -108,6 +110,13 @@ export function App() {
       id: 'inspector',
       component: 'inspector',
       title: 'MCU',
+      position: { referencePanel: problems, direction: 'within' },
+    });
+
+    event.api.addPanel({
+      id: 'disassembly',
+      component: 'disassembly',
+      title: 'Disassembly',
       position: { referencePanel: problems, direction: 'within' },
     });
 

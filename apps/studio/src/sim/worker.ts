@@ -12,8 +12,10 @@ import * as Comlink from 'comlink';
 import {
   Led,
   decodeUart,
+  disassemble,
   loadHex,
   type ChannelSpec,
+  type DisasmLine,
   type Fault,
 } from '@robo-journey/sim-core';
 import { buildCircuit, splitTerminal, type BuiltCircuit, type Project } from '@robo-journey/parts';
@@ -78,6 +80,13 @@ class Simulation implements SimApi {
   private detachSerial: (() => void) | null = null;
   /** Errors thrown by the engine, surfaced through the snapshot rather than killing the worker. */
   private runtimeProblems: string[] = [];
+  /**
+   * Flash image, kept alongside the board.
+   *
+   * Disassembly must survive a rebuild: editing the circuit re-creates the board, and the listing
+   * belongs to the firmware rather than to the circuit around it.
+   */
+  private progMem: Uint16Array | null = null;
 
   load(project: Project, hex: string): void {
     this.project = project;
@@ -115,7 +124,9 @@ class Simulation implements SimApi {
 
   stepInstruction(): void {
     this.pause();
-    this.built?.board.mcu.step();
+    // Board.stepInstruction settles the circuit afterwards and clears the stop, which is what lets
+    // the debugger step off a breakpoint it is sitting on.
+    this.built?.board.stepInstruction();
   }
 
   stepTime(seconds: number): void {
@@ -177,6 +188,7 @@ class Simulation implements SimApi {
       faults: board.faults as Fault[],
       serial,
       problems: [...problems, ...this.runtimeProblems],
+      stoppedAt: board.stoppedAtBreakpoint,
     };
   }
 
@@ -257,21 +269,49 @@ class Simulation implements SimApi {
     };
   }
 
+  disassembly(from: number, to: number): DisasmLine[] {
+    if (!this.progMem) return [];
+    return disassemble(this.progMem, { from, to });
+  }
+
+  setBreakpoint(byteAddress: number): void {
+    this.built?.board.setBreakpoint(byteAddress);
+  }
+
+  clearBreakpoint(byteAddress: number): void {
+    this.built?.board.clearBreakpoint(byteAddress);
+  }
+
+  clearBreakpoints(): void {
+    this.built?.board.clearBreakpoints();
+  }
+
+  breakpoints(): number[] {
+    return this.built?.board.breakpoints ?? [];
+  }
+
   // -------------------------------------------------------------------------------------------
 
   private rebuild(): void {
+    const previousBreakpoints = this.built?.board.breakpoints ?? [];
     this.detachSerial?.();
     this.detachSerial = null;
     this.serialBuffer = '';
 
     if (!this.project || !this.hex) {
       this.built = null;
+      this.progMem = null;
       return;
     }
 
     this.runtimeProblems = [];
     const progMem = loadHex(this.hex);
+    this.progMem = progMem;
     this.built = buildCircuit(this.project, { progMem });
+
+    // A circuit edit rebuilds the board, but breakpoints belong to the firmware and must persist
+    // -- losing them every time a wire moves would make the debugger useless while wiring.
+    for (const address of previousBreakpoints) this.built.board.setBreakpoint(address);
 
     this.detachSerial = this.built.board.mcu.onSerialByte((byte) => {
       // Cap the buffer: a sketch printing in a tight loop must not grow this without bound
