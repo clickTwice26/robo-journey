@@ -65,15 +65,26 @@ function contentBounds(project: Project): { x: number; y: number; w: number; h: 
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
-export function Workspace({ width, height, onControls }: Props & {
+export function Workspace({ width, height, onControls, onPartContextMenu }: Props & {
   /** Hands zoom controls back to the hosting panel, which renders them over the canvas. */
   onControls?: (controls: CanvasControls) => void;
+  /** Right-click on a part, in page coordinates, so the panel can open a DOM menu there. */
+  onPartContextMenu?: (event: { partId: string; x: number; y: number }) => void;
 }) {
   const project = useStudio((s) => s.project);
   const snapshot = useStudio((s) => s.snapshot);
   const selection = useStudio((s) => s.selection);
   const mode = useStudio((s) => s.mode);
-  const { addPart, movePart, addWire, setSelection, setMode } = useStudio.getState();
+  const {
+    addPart,
+    movePart,
+    movePartWithAttached,
+    addWire,
+    removeWire,
+    removePart,
+    setSelection,
+    setMode,
+  } = useStudio.getState();
 
   const [view, setView] = useState({ x: 40, y: 30, scale: 1 });
   const [hoverTerminal, setHoverTerminal] = useState<string | null>(null);
@@ -192,9 +203,9 @@ export function Workspace({ width, height, onControls }: Props & {
     (partId: string, rawX: number, rawY: number) => {
       const x = snapToPitch(rawX);
       const y = snapToPitch(rawY);
-      movePart(partId, x, y);
 
-      const part = useStudio.getState().project.parts.find((p) => p.id === partId);
+      const current = useStudio.getState().project;
+      const part = current.parts.find((p) => p.id === partId);
       if (!part) return;
       let definition;
       try {
@@ -202,7 +213,16 @@ export function Workspace({ width, height, onControls }: Props & {
       } catch {
         return;
       }
-      if (definition.internalSpec) return; // breadboards do not plug into anything
+
+      if (definition.internalSpec) {
+        // Dragging a board takes everything plugged into it along. Anything else means the legs
+        // stay behind while the holes move away, which looks like a rendering bug and is really a
+        // circuit that has quietly come apart.
+        movePartWithAttached(partId, x, y, partsPluggedInto(current, partId));
+        return;
+      }
+
+      movePart(partId, x, y);
 
       const existing = new Set(
         useStudio.getState().project.wires.flatMap((w) => [w.from, w.to]),
@@ -244,6 +264,34 @@ export function Workspace({ width, height, onControls }: Props & {
     [width, height],
   );
 
+  /**
+   * Delete or Backspace removes the selection.
+   *
+   * Bound on the window rather than the stage: Konva's canvas is not focusable, so a stage-level
+   * key handler would never fire. Guarded against firing while a text field has focus, or typing
+   * a resistance would delete the resistor.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+
+      const active = document.activeElement;
+      const typing =
+        active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement ||
+        (active instanceof HTMLElement && active.isContentEditable);
+      if (typing) return;
+
+      const selected = useStudio.getState().selection;
+      if (!selected) return;
+      event.preventDefault();
+      removePart(selected);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [removePart]);
+
   // Publish the controls once they are stable, so the panel can render buttons over the stage.
   useEffect(() => {
     onControls?.({
@@ -282,9 +330,18 @@ export function Workspace({ width, height, onControls }: Props & {
           const selected = selection === part.id;
           const common = { part, selected };
           const draggable = true;
+          const definition = (() => {
+            try {
+              return partDefinition(part.type);
+            } catch {
+              return null;
+            }
+          })();
 
           const shape =
-            part.type === 'breadboard-half' ? <BreadboardShape {...common} /> :
+            definition?.internalSpec ? (
+              <BreadboardShape {...common} spec={definition.internalSpec} />
+            ) :
             part.type === 'arduino-uno' ? (
               <UnoShape {...common} showLabels={view.scale >= LABEL_ZOOM_THRESHOLD} />
             ) :
@@ -305,6 +362,16 @@ export function Workspace({ width, height, onControls }: Props & {
                 e.cancelBubble = true;
                 setSelection(part.id);
               }}
+              onContextMenu={(e) => {
+                e.evt.preventDefault();
+                e.cancelBubble = true;
+                setSelection(part.id);
+                onPartContextMenu?.({
+                  partId: part.id,
+                  x: e.evt.clientX,
+                  y: e.evt.clientY,
+                });
+              }}
               onDragEnd={(e) => {
                 handleDragEnd(part.id, e.target.x() / PX_PER_MM, e.target.y() / PX_PER_MM);
               }}
@@ -316,7 +383,7 @@ export function Workspace({ width, height, onControls }: Props & {
       </Layer>
 
       {/* Wires and live overlay. */}
-      <Layer listening={false}>
+      <Layer>
         {project.wires.map((wire) => {
           const from = terminals.get(wire.from);
           const to = terminals.get(wire.to);
@@ -330,6 +397,13 @@ export function Workspace({ width, height, onControls }: Props & {
               strokeWidth={2}
               lineCap="round"
               opacity={0.95}
+              // Generous hit width: a 2 px line is almost impossible to click deliberately.
+              hitStrokeWidth={10}
+              onContextMenu={(e) => {
+                e.evt.preventDefault();
+                e.cancelBubble = true;
+                removeWire(wire.id);
+              }}
             />
           );
         })}
@@ -358,6 +432,29 @@ export function Workspace({ width, height, onControls }: Props & {
       </Layer>
     </Stage>
   );
+}
+
+/**
+ * Parts with at least one leg in the given board's holes.
+ *
+ * A leg in a hole is recorded as a wire from the part's pin to `<board>:<hole>`, so plugged-in
+ * parts are exactly those on the other end of such a wire.
+ */
+function partsPluggedInto(project: Project, boardId: string): string[] {
+  const prefix = `${boardId}:`;
+  const attached = new Set<string>();
+
+  for (const wire of project.wires) {
+    const ends = [wire.from, wire.to];
+    const boardEnd = ends.find((end) => end.startsWith(prefix));
+    if (!boardEnd) continue;
+    const other = ends.find((end) => end !== boardEnd);
+    if (!other) continue;
+    const partId = other.slice(0, other.indexOf(':'));
+    if (partId && partId !== boardId) attached.add(partId);
+  }
+
+  return [...attached];
 }
 
 /** A wire's colour, tinted toward its measured voltage once the simulation is running. */

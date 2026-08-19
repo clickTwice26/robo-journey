@@ -33,7 +33,19 @@ export interface BreadboardSpec {
   readonly railSegments: number;
 }
 
-/** Half-size, 400 tie points. The default: it fits an Uno and a small circuit on screen. */
+/**
+ * Mini, 170 tie points. No power rails -- the small ones do not have them.
+ *
+ * The right default for a first circuit: an LED and a resistor need three strips, and a 30-column
+ * board next to them is mostly empty plastic taking up screen.
+ */
+export const MINI_BREADBOARD: BreadboardSpec = {
+  columns: 17,
+  powerRails: false,
+  railSegments: 1,
+};
+
+/** Half-size, 400 tie points. Fits an Uno and a small circuit. */
 export const HALF_SIZE_BREADBOARD: BreadboardSpec = {
   columns: 30,
   powerRails: true,
@@ -122,4 +134,49 @@ export function breadboardHoles(board: string, spec: BreadboardSpec): string[] {
     }
   }
   return holes;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Physical layout
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Where each row sits, in pitch units down from the board's top edge.
+ *
+ * Shared by the canvas geometry and the artwork so a hole cannot be drawn in one place and wired
+ * in another. A board without power rails starts its numbered rows two pitches higher, because
+ * there is no rail to leave room for.
+ *
+ * The centre channel occupies one full pitch between rows E and F, which is exactly why a DIP chip
+ * straddling it lands one row of legs on each side.
+ */
+export function rowOffset(spec: BreadboardSpec, row: BreadboardRow): number {
+  const base = spec.powerRails ? 3 : 1;
+  const index = ALL_ROWS.indexOf(row);
+  // Rows F-J sit one extra pitch down, across the channel.
+  return base + index + (index >= UPPER_ROWS.length ? 1 : 0);
+}
+
+/** Where a power rail sits, in pitch units from the top edge. Null when the board has none. */
+export function railOffset(
+  spec: BreadboardSpec,
+  side: RailSide,
+  polarity: RailPolarity,
+): number | null {
+  if (!spec.powerRails) return null;
+  const positive = polarity === 'positive';
+  if (side === 'top') return positive ? 0.5 : 1.5;
+  // Bottom rails sit below row J plus a margin.
+  return rowOffset(spec, 'J') + (positive ? 1.5 : 2.5);
+}
+
+/** The channel's top edge and height, in pitch units. */
+export function channelBounds(spec: BreadboardSpec): { top: number; height: number } {
+  // Centred on the empty pitch between rows E and F.
+  return { top: rowOffset(spec, 'E') + 0.55, height: 0.9 };
+}
+
+/** Total board height in pitch units, including margins. */
+export function boardRows(spec: BreadboardSpec): number {
+  return spec.powerRails ? 17 : 13;
 }

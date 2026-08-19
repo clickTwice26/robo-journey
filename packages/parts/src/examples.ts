@@ -5,15 +5,25 @@
  * 0.1" pitch, and every leg is in a hole it could actually reach. Loading one and pressing Run is
  * the fastest way to see the simulator do something true.
  */
+import {
+  HALF_SIZE_BREADBOARD,
+  MINI_BREADBOARD,
+  rowOffset,
+  type BreadboardRow,
+} from '@robo-journey/sim-core';
 import { PITCH_MM } from './registry.js';
 import { parseProject, type Project } from './project.js';
 
-/** Breadboard origin used by the examples, and the y of each row. */
+/**
+ * Breadboard origin used by the examples, and the y of each row.
+ *
+ * Row offsets come from `rowOffset` rather than a local table so an example's legs land in the
+ * holes the netlist actually wires -- the two drifting apart is exactly the misalignment that a
+ * duplicated table invites.
+ */
 const BB_Y = 63.5;
-const ROW_OFFSET: Record<string, number> = {
-  A: 3, B: 4, C: 5, D: 6, E: 7, F: 9, G: 10, H: 11, I: 12, J: 13,
-};
-const rowY = (row: string): number => BB_Y + (ROW_OFFSET[row] ?? 0) * PITCH_MM;
+const rowY = (row: BreadboardRow): number =>
+  BB_Y + rowOffset(MINI_BREADBOARD, row) * PITCH_MM;
 const colX = (column: number): number => column * PITCH_MM;
 
 export interface Example {
@@ -40,7 +50,7 @@ const BLINK: Example = {
       name: 'Blink',
       parts: [
         { id: 'uno1', type: 'arduino-uno', x: 12.7, y: 0 },
-        { id: 'bb1', type: 'breadboard-half', x: 0, y: BB_Y },
+        { id: 'bb1', type: 'breadboard-mini', x: 0, y: BB_Y },
         { id: 'r1', type: 'resistor', x: colX(5), y: rowY('B'), props: { ohms: 220 } },
         { id: 'led1', type: 'led', x: colX(9), y: rowY('C'), props: { color: 'red' } },
       ],
@@ -91,7 +101,7 @@ const NO_RESISTOR: Example = {
       name: 'LED without a resistor',
       parts: [
         { id: 'uno1', type: 'arduino-uno', x: 12.7, y: 0 },
-        { id: 'bb1', type: 'breadboard-half', x: 0, y: BB_Y },
+        { id: 'bb1', type: 'breadboard-mini', x: 0, y: BB_Y },
         { id: 'led1', type: 'led', x: colX(5), y: rowY('C'), props: { color: 'red' } },
       ],
       wires: [
@@ -105,6 +115,10 @@ const NO_RESISTOR: Example = {
 };
 
 /** Button on D2 with the internal pull-up, mirrored to the built-in LED. */
+/** Row y on the half-size board, which sits two pitches lower because it carries power rails. */
+const halfRowY = (row: BreadboardRow): number =>
+  BB_Y + rowOffset(HALF_SIZE_BREADBOARD, row) * PITCH_MM;
+
 const BUTTON: Example = {
   id: 'button',
   name: 'Button with pull-up',
@@ -118,9 +132,9 @@ const BUTTON: Example = {
         { id: 'bb1', type: 'breadboard-half', x: 0, y: BB_Y },
         // A tactile switch straddles the centre channel, which is the only way its two contacts
         // land on separate strips.
-        { id: 'sw1', type: 'pushbutton', x: colX(5), y: rowY('E') },
-        { id: 'r1', type: 'resistor', x: colX(12), y: rowY('B'), props: { ohms: 220 } },
-        { id: 'led1', type: 'led', x: colX(16), y: rowY('C'), props: { color: 'green' } },
+        { id: 'sw1', type: 'pushbutton', x: colX(5), y: halfRowY('E') },
+        { id: 'r1', type: 'resistor', x: colX(12), y: halfRowY('B'), props: { ohms: 220 } },
+        { id: 'led1', type: 'led', x: colX(16), y: halfRowY('C'), props: { color: 'green' } },
       ],
       wires: [
         { id: 'w1', from: 'uno1:D2', to: 'bb1:5A' },

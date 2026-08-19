@@ -11,6 +11,10 @@ import { Circle, Group, Line, Rect, Text } from 'react-konva';
 import {
   ALL_ROWS,
   HALF_SIZE_BREADBOARD,
+  boardRows,
+  channelBounds,
+  railOffset,
+  rowOffset,
   type BreadboardSpec,
 } from '@robo-journey/sim-core';
 import { PITCH_MM, partDefinition, type PartInstance } from '@robo-journey/parts';
@@ -42,20 +46,19 @@ export function BreadboardShape({
   spec = HALF_SIZE_BREADBOARD,
 }: ShapeProps & { spec?: BreadboardSpec }) {
   const width = mm((spec.columns + 2) * PITCH_MM);
-  const height = mm(17 * PITCH_MM);
+  const height = mm(boardRows(spec) * PITCH_MM);
+  const channel = channelBounds(spec);
 
+  // Every hole is drawn from the same offsets the netlist uses, so a leg that looks like it is in
+  // a hole really is in that hole.
   const holes: React.ReactElement[] = [];
-  const rowY: Record<string, number> = {
-    A: 3, B: 4, C: 5, D: 6, E: 7, F: 9, G: 10, H: 11, I: 12, J: 13,
-  };
-
   for (let column = 1; column <= spec.columns; column++) {
     for (const row of ALL_ROWS) {
       holes.push(
         <Rect
           key={`${column}${row}`}
           x={mm(column * PITCH_MM) - 1.6}
-          y={mm(rowY[row]! * PITCH_MM) - 1.6}
+          y={mm(rowOffset(spec, row) * PITCH_MM) - 1.6}
           width={3.2}
           height={3.2}
           fill={canvas.breadboardHole}
@@ -67,24 +70,45 @@ export function BreadboardShape({
   }
 
   const rails: React.ReactElement[] = [];
-  for (const [side, baseY] of [['top', 0.5], ['bottom', 14.5]] as const) {
-    for (const [polarity, offset] of [['positive', 0], ['negative', 1]] as const) {
-      for (let column = 1; column <= spec.columns; column++) {
-        // Rail holes are grouped in fives on a real board; the gaps are cosmetic but they are what
-        // makes a breadboard legible at a glance, so they are drawn.
-        if (column % 6 === 0) continue;
-        rails.push(
-          <Rect
-            key={`${side}${polarity}${column}`}
-            x={mm(column * PITCH_MM) - 1.6}
-            y={mm((baseY + offset) * PITCH_MM) - 1.6}
-            width={3.2}
-            height={3.2}
-            fill={canvas.breadboardHole}
-            cornerRadius={0.6}
+  const railLines: React.ReactElement[] = [];
+  if (spec.powerRails) {
+    for (const side of ['top', 'bottom'] as const) {
+      for (const polarity of ['positive', 'negative'] as const) {
+        const offset = railOffset(spec, side, polarity);
+        if (offset === null) continue;
+
+        railLines.push(
+          <Line
+            key={`line-${side}-${polarity}`}
+            points={[
+              mm(PITCH_MM),
+              mm((offset + (polarity === 'positive' ? -0.45 : 0.45)) * PITCH_MM),
+              width - mm(PITCH_MM),
+              mm((offset + (polarity === 'positive' ? -0.45 : 0.45)) * PITCH_MM),
+            ]}
+            stroke={polarity === 'positive' ? canvas.railPositive : canvas.railNegative}
+            strokeWidth={1}
             listening={false}
           />,
         );
+
+        for (let column = 1; column <= spec.columns; column++) {
+          // Rail holes come in groups of five on a real board; the gaps are cosmetic but they are
+          // what makes a breadboard legible at a glance.
+          if (column % 6 === 0) continue;
+          rails.push(
+            <Rect
+              key={`${side}${polarity}${column}`}
+              x={mm(column * PITCH_MM) - 1.6}
+              y={mm(offset * PITCH_MM) - 1.6}
+              width={3.2}
+              height={3.2}
+              fill={canvas.breadboardHole}
+              cornerRadius={0.6}
+              listening={false}
+            />,
+          );
+        }
       }
     }
   }
@@ -102,35 +126,22 @@ export function BreadboardShape({
       {/* Centre channel: the single most important feature of a breadboard. */}
       <Rect
         x={0}
-        y={mm(7.6 * PITCH_MM)}
+        y={mm(channel.top * PITCH_MM)}
         width={width}
-        height={mm(1.4 * PITCH_MM)}
+        height={mm(channel.height * PITCH_MM)}
         fill={canvas.breadboardChannel}
+        listening={false}
       />
-      {/* Rail stripes, and the mid-rail break that catches everyone out. */}
-      {[0.5, 14.5].map((y) => (
-        <Line
-          key={`plus${y}`}
-          points={[mm(PITCH_MM), mm((y - 0.45) * PITCH_MM), width - mm(PITCH_MM), mm((y - 0.45) * PITCH_MM)]}
-          stroke={canvas.railPositive}
-          strokeWidth={1}
-        />
-      ))}
-      {[1.5, 15.5].map((y) => (
-        <Line
-          key={`minus${y}`}
-          points={[mm(PITCH_MM), mm((y + 0.45) * PITCH_MM), width - mm(PITCH_MM), mm((y + 0.45) * PITCH_MM)]}
-          stroke={canvas.railNegative}
-          strokeWidth={1}
-        />
-      ))}
-      {spec.railSegments > 1 && (
+      {railLines}
+      {/* The mid-rail break, which is why half a circuit sometimes goes dead. */}
+      {spec.powerRails && spec.railSegments > 1 && (
         <Rect
-          x={mm(((spec.columns / 2) + 0.5) * PITCH_MM) - 2}
+          x={mm((spec.columns / 2 + 0.5) * PITCH_MM) - 2}
           y={0}
           width={4}
           height={height}
           fill={canvas.breadboardBody}
+          listening={false}
         />
       )}
       {rails}
@@ -140,7 +151,7 @@ export function BreadboardShape({
         <Text
           key={column}
           x={mm(column * PITCH_MM) - 6}
-          y={mm(2.1 * PITCH_MM)}
+          y={mm((rowOffset(spec, 'A') - 0.85) * PITCH_MM)}
           width={12}
           align="center"
           text={String(column)}

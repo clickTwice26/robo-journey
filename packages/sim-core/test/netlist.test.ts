@@ -10,11 +10,16 @@ import { Netlist } from '../src/netlist/netlist.js';
 import {
   FULL_SIZE_BREADBOARD,
   HALF_SIZE_BREADBOARD,
+  MINI_BREADBOARD,
   addBreadboard,
+  boardRows,
   breadboardHoles,
+  channelBounds,
   holeId,
   railHoleId,
+  railOffset,
   railSegmentOf,
+  rowOffset,
 } from '../src/netlist/breadboard.js';
 
 describe('Netlist', () => {
@@ -199,6 +204,77 @@ describe('breadboard topology', () => {
     addBreadboard(net, 'bb1', HALF_SIZE_BREADBOARD);
     addBreadboard(net, 'bb2', HALF_SIZE_BREADBOARD);
     expect(net.areConnected(holeId('bb1', 5, 'A'), holeId('bb2', 5, 'A'))).toBe(false);
+  });
+
+  describe('the mini board', () => {
+    function miniBoard(): Netlist {
+      const net = new Netlist();
+      addBreadboard(net, BB, MINI_BREADBOARD);
+      return net;
+    }
+
+    it('has 17 columns and 170 tie points', () => {
+      expect(breadboardHoles(BB, MINI_BREADBOARD)).toHaveLength(17 * 10);
+    });
+
+    it('still splits at the centre channel', () => {
+      const net = miniBoard();
+      expect(net.areConnected(holeId(BB, 5, 'A'), holeId(BB, 5, 'E'))).toBe(true);
+      expect(net.areConnected(holeId(BB, 5, 'E'), holeId(BB, 5, 'F'))).toBe(false);
+    });
+
+    it('has no power rails at all', () => {
+      const net = miniBoard();
+      // A mini board genuinely has none, so asking for a rail hole must find nothing rather than
+      // silently inventing one.
+      expect(net.has(railHoleId(BB, 'top', 'positive', 1))).toBe(false);
+      expect(railOffset(MINI_BREADBOARD, 'top', 'positive')).toBeNull();
+    });
+  });
+
+  describe('physical layout', () => {
+    it('starts numbered rows higher on a board without rails', () => {
+      // No rail to leave room for, so row A moves up two pitches.
+      expect(rowOffset(HALF_SIZE_BREADBOARD, 'A')).toBe(3);
+      expect(rowOffset(MINI_BREADBOARD, 'A')).toBe(1);
+    });
+
+    it('leaves exactly one pitch of channel between rows E and F', () => {
+      for (const spec of [MINI_BREADBOARD, HALF_SIZE_BREADBOARD, FULL_SIZE_BREADBOARD]) {
+        expect(rowOffset(spec, 'F') - rowOffset(spec, 'E')).toBe(2);
+      }
+    });
+
+    it('spaces rows one pitch apart within each half', () => {
+      for (const spec of [MINI_BREADBOARD, HALF_SIZE_BREADBOARD]) {
+        expect(rowOffset(spec, 'B') - rowOffset(spec, 'A')).toBe(1);
+        expect(rowOffset(spec, 'J') - rowOffset(spec, 'I')).toBe(1);
+      }
+    });
+
+    it('puts the channel between rows E and F, touching neither', () => {
+      const spec = HALF_SIZE_BREADBOARD;
+      const channel = channelBounds(spec);
+      expect(channel.top).toBeGreaterThan(rowOffset(spec, 'E'));
+      expect(channel.top + channel.height).toBeLessThan(rowOffset(spec, 'F'));
+    });
+
+    it('puts the bottom rails below row J', () => {
+      const spec = HALF_SIZE_BREADBOARD;
+      expect(railOffset(spec, 'bottom', 'positive')!).toBeGreaterThan(rowOffset(spec, 'J'));
+      expect(railOffset(spec, 'bottom', 'negative')!).toBeLessThan(boardRows(spec));
+    });
+
+    it('keeps every row and rail inside the board', () => {
+      for (const spec of [MINI_BREADBOARD, HALF_SIZE_BREADBOARD, FULL_SIZE_BREADBOARD]) {
+        const rows = boardRows(spec);
+        expect(rowOffset(spec, 'J')).toBeLessThan(rows);
+        if (spec.powerRails) {
+          expect(railOffset(spec, 'bottom', 'negative')!).toBeLessThan(rows);
+          expect(railOffset(spec, 'top', 'positive')!).toBeGreaterThan(0);
+        }
+      }
+    });
   });
 
   it('lets a wire bridge the channel when the user asks for it', () => {

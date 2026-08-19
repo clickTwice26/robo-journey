@@ -89,13 +89,18 @@ export {
   ALL_ROWS,
   FULL_SIZE_BREADBOARD,
   HALF_SIZE_BREADBOARD,
+  MINI_BREADBOARD,
   LOWER_ROWS,
   UPPER_ROWS,
   addBreadboard,
+  boardRows,
   breadboardHoles,
+  channelBounds,
   holeId,
   railHoleId,
+  railOffset,
   railSegmentOf,
+  rowOffset,
 } from './netlist/breadboard.js';
 export type {
   BreadboardRow,

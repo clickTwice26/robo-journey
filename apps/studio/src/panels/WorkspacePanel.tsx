@@ -7,17 +7,32 @@
  * Zoom controls live here rather than inside the stage: they are DOM buttons floating over the
  * canvas, which keeps them crisp at any zoom and out of Konva's hit-testing.
  */
-import { Box, IconButton, Paper, Stack, Tooltip } from '@mui/material';
+import {
+  Box,
+  IconButton,
+  ListItemIcon,
+  ListItemText,
+  Menu,
+  MenuItem,
+  Paper,
+  Stack,
+  Tooltip,
+} from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import FitScreenIcon from '@mui/icons-material/FitScreen';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlineOutlined';
+import LinkOffIcon from '@mui/icons-material/LinkOff';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Workspace, type CanvasControls } from '../canvas/Workspace.tsx';
+import { useStudio } from '../store.ts';
 
 export function WorkspacePanel() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const controlsRef = useRef<CanvasControls | null>(null);
+  const [menu, setMenu] = useState<{ partId: string; x: number; y: number } | null>(null);
+  const removePart = useStudio((s) => s.removePart);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -36,11 +51,61 @@ export function WorkspacePanel() {
     controlsRef.current = controls;
   }, []);
 
+  const handleContextMenu = useCallback(
+    (event: { partId: string; x: number; y: number }) => setMenu(event),
+    [],
+  );
+
+  /** Detach a part without deleting it: legs come out of the holes, the part stays on the canvas. */
+  const unplug = useCallback((partId: string) => {
+    const state = useStudio.getState();
+    for (const wire of state.project.wires) {
+      if (wire.from.startsWith(`${partId}:`) || wire.to.startsWith(`${partId}:`)) {
+        state.removeWire(wire.id);
+      }
+    }
+  }, []);
+
   return (
     <Box ref={containerRef} sx={{ height: '100%', width: '100%', overflow: 'hidden', position: 'relative' }}>
       {size.width > 0 && (
-        <Workspace width={size.width} height={size.height} onControls={handleControls} />
+        <Workspace
+          width={size.width}
+          height={size.height}
+          onControls={handleControls}
+          onPartContextMenu={handleContextMenu}
+        />
       )}
+
+      <Menu
+        open={menu !== null}
+        onClose={() => setMenu(null)}
+        anchorReference="anchorPosition"
+        anchorPosition={menu ? { top: menu.y, left: menu.x } : undefined}
+      >
+        <MenuItem
+          onClick={() => {
+            if (menu) unplug(menu.partId);
+            setMenu(null);
+          }}
+        >
+          <ListItemIcon>
+            <LinkOffIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary="Unplug" secondary="Remove its wires, keep the part" />
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            if (menu) removePart(menu.partId);
+            setMenu(null);
+          }}
+        >
+          <ListItemIcon>
+            <DeleteOutlineIcon fontSize="small" color="error" />
+          </ListItemIcon>
+          <ListItemText primary="Delete part" />
+        </MenuItem>
+      </Menu>
       <Paper
         variant="outlined"
         sx={{ position: 'absolute', right: 8, bottom: 8, p: 0.25, bgcolor: 'background.paper' }}
@@ -63,6 +128,7 @@ export function WorkspacePanel() {
           </Tooltip>
         </Stack>
       </Paper>
+
     </Box>
   );
 }

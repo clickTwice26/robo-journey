@@ -8,7 +8,9 @@ export type { BuildOptions, BuiltCircuit } from './build.js';
 
 export {
   ARDUINO_UNO,
+  BREADBOARD_FULL,
   BREADBOARD_HALF,
+  BREADBOARD_MINI,
   LED,
   PITCH_MM,
   PUSHBUTTON,

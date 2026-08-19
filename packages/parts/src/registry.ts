@@ -11,7 +11,9 @@
  */
 import { Led, Resistor, type Device } from '@robo-journey/sim-core';
 import {
+  FULL_SIZE_BREADBOARD,
   HALF_SIZE_BREADBOARD,
+  MINI_BREADBOARD,
   type BreadboardSpec,
 } from '@robo-journey/sim-core';
 
@@ -63,18 +65,35 @@ export interface PartDefinition {
 
 // ---------------------------------------------------------------------------------------------
 
-/** Half-size breadboard: 30 columns, split power rails. */
-const BREADBOARD_HALF: PartDefinition = {
-  type: 'breadboard-half',
-  label: 'Breadboard (half)',
-  category: 'board',
-  // 30 columns plus a margin, and 10 rows plus the two rail pairs.
-  width: 32 * PITCH_MM,
-  height: 17 * PITCH_MM,
-  pins: [],
-  defaults: {},
-  internalSpec: HALF_SIZE_BREADBOARD,
-};
+/**
+ * Breadboards.
+ *
+ * Three real sizes, because the choice matters on screen as much as on a desk: a 170-point mini is
+ * the right board for an LED and a resistor, and a 30-column half-size beside them is mostly empty
+ * plastic. Height depends on whether the board carries power rails.
+ */
+function breadboard(
+  type: string,
+  label: string,
+  spec: BreadboardSpec,
+): PartDefinition {
+  // Numbered rows occupy 10 pitches plus margins; rails add two pitches at each edge.
+  const rows = spec.powerRails ? 17 : 13;
+  return {
+    type,
+    label,
+    category: 'board',
+    width: (spec.columns + 2) * PITCH_MM,
+    height: rows * PITCH_MM,
+    pins: [],
+    defaults: {},
+    internalSpec: spec,
+  };
+}
+
+const BREADBOARD_MINI = breadboard('breadboard-mini', 'Breadboard (mini, 170pt)', MINI_BREADBOARD);
+const BREADBOARD_HALF = breadboard('breadboard-half', 'Breadboard (half, 400pt)', HALF_SIZE_BREADBOARD);
+const BREADBOARD_FULL = breadboard('breadboard-full', 'Breadboard (full, 830pt)', FULL_SIZE_BREADBOARD);
 
 /**
  * Arduino Uno.
@@ -223,8 +242,10 @@ const PUSHBUTTON: PartDefinition = {
 };
 
 const DEFINITIONS: readonly PartDefinition[] = [
-  BREADBOARD_HALF,
   ARDUINO_UNO,
+  BREADBOARD_MINI,
+  BREADBOARD_HALF,
+  BREADBOARD_FULL,
   RESISTOR,
   LED,
   PUSHBUTTON,
@@ -242,4 +263,12 @@ export function allParts(): readonly PartDefinition[] {
   return DEFINITIONS;
 }
 
-export { BREADBOARD_HALF, ARDUINO_UNO, RESISTOR, LED, PUSHBUTTON };
+export {
+  ARDUINO_UNO,
+  BREADBOARD_FULL,
+  BREADBOARD_HALF,
+  BREADBOARD_MINI,
+  LED,
+  PUSHBUTTON,
+  RESISTOR,
+};

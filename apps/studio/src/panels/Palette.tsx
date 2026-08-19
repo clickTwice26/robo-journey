@@ -159,6 +159,10 @@ function Inspector() {
       >
         Delete part
       </Button>
+      <Typography variant="caption" color="text.secondary">
+        Delete key removes the selection. Right-click a part on the canvas to unplug it without
+        deleting, or right-click a wire to remove just that connection.
+      </Typography>
     </Stack>
   );
 }

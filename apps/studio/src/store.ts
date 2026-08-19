@@ -44,6 +44,8 @@ interface StudioState {
   setProject(project: Project): void;
   addPart(part: PartInstance): void;
   movePart(id: string, x: number, y: number): void;
+  /** Move one part to an absolute position and shift others by the same delta, in one update. */
+  movePartWithAttached(id: string, x: number, y: number, attached: readonly string[]): void;
   updatePartProps(id: string, props: Record<string, unknown>): void;
   removePart(id: string): void;
 
@@ -81,6 +83,26 @@ export const useStudio = create<StudioState>((set) => ({
         parts: state.project.parts.map((p) => (p.id === id ? { ...p, x, y } : p)),
       },
     })),
+
+  movePartWithAttached: (id, x, y, attached) =>
+    set((state) => {
+      const anchor = state.project.parts.find((p) => p.id === id);
+      if (!anchor) return state;
+      const dx = x - anchor.x;
+      const dy = y - anchor.y;
+      const moving = new Set(attached);
+
+      return {
+        project: {
+          ...state.project,
+          parts: state.project.parts.map((part) => {
+            if (part.id === id) return { ...part, x, y };
+            if (!moving.has(part.id)) return part;
+            return { ...part, x: part.x + dx, y: part.y + dy };
+          }),
+        },
+      };
+    }),
 
   updatePartProps: (id, props) =>
     set((state) => ({

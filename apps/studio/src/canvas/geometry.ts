@@ -11,7 +11,8 @@ import {
   HALF_SIZE_BREADBOARD,
   holeId,
   railHoleId,
-  type BreadboardRow,
+  railOffset,
+  rowOffset,
   type BreadboardSpec,
 } from '@robo-journey/sim-core';
 import { PITCH_MM, partDefinition, terminalId, type Project } from '@robo-journey/parts';
@@ -21,21 +22,8 @@ export interface Point {
   readonly y: number;
 }
 
-/** Row offsets down the board, in pitch units from the board's origin. */
-const ROW_Y: Record<BreadboardRow, number> = {
-  A: 3, B: 4, C: 5, D: 6, E: 7,
-  // The centre channel occupies row 8: a whole pitch of empty plastic, which is why a DIP chip
-  // straddling it lands one row of legs each side.
-  F: 9, G: 10, H: 11, I: 12, J: 13,
-};
-
-const TOP_RAIL_Y = { positive: 0.5, negative: 1.5 } as const;
-const BOTTOM_RAIL_Y = { positive: 14.5, negative: 15.5 } as const;
-
 /** Columns start one pitch in from the left edge. */
 const COLUMN_X = (column: number): number => column * PITCH_MM;
-
-export const BREADBOARD_ROWS_TOTAL = 17;
 
 /** Where a breadboard's holes sit relative to the board's origin. */
 export function breadboardHolePositions(
@@ -49,22 +37,22 @@ export function breadboardHolePositions(
     for (const row of ALL_ROWS) {
       positions.set(holeId(boardId, column, row), {
         x: origin.x + COLUMN_X(column),
-        y: origin.y + ROW_Y[row] * PITCH_MM,
+        y: origin.y + rowOffset(spec, row) * PITCH_MM,
       });
     }
   }
 
   if (spec.powerRails) {
-    for (const polarity of ['positive', 'negative'] as const) {
-      for (let column = 1; column <= spec.columns; column++) {
-        positions.set(railHoleId(boardId, 'top', polarity, column), {
-          x: origin.x + COLUMN_X(column),
-          y: origin.y + TOP_RAIL_Y[polarity] * PITCH_MM,
-        });
-        positions.set(railHoleId(boardId, 'bottom', polarity, column), {
-          x: origin.x + COLUMN_X(column),
-          y: origin.y + BOTTOM_RAIL_Y[polarity] * PITCH_MM,
-        });
+    for (const side of ['top', 'bottom'] as const) {
+      for (const polarity of ['positive', 'negative'] as const) {
+        const offset = railOffset(spec, side, polarity);
+        if (offset === null) continue;
+        for (let column = 1; column <= spec.columns; column++) {
+          positions.set(railHoleId(boardId, side, polarity, column), {
+            x: origin.x + COLUMN_X(column),
+            y: origin.y + offset * PITCH_MM,
+          });
+        }
       }
     }
   }
