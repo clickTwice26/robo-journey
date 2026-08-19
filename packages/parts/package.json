@@ -1,0 +1,16 @@
+{
+  "name": "@robo-journey/parts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Component SDK and part library: definitions, project model, and the bridge from a wired-up canvas to a solvable circuit.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": { "build": "tsc --build" },
+  "dependencies": {
+    "@robo-journey/sim-core": "*",
+    "zod": "^4.4.3"
+  }
+}

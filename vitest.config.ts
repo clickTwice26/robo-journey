@@ -10,6 +10,7 @@ export default defineConfig({
     alias: {
       '@robo-journey/sim-core': src('sim-core'),
       '@robo-journey/compile-service': src('compile-service'),
+      '@robo-journey/parts': src('parts'),
     },
   },
   test: {

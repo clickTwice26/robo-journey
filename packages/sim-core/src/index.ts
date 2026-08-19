@@ -81,3 +81,25 @@ export type { LogicLevel } from './mcu/pin-model.js';
 
 export { fault, formatCurrent, formatVoltage } from './faults/index.js';
 export type { Fault, FaultCode, FaultSeverity } from './faults/index.js';
+
+// --- Netlist and breadboard topology ------------------------------------------------------------
+
+export { Netlist } from './netlist/netlist.js';
+export {
+  ALL_ROWS,
+  FULL_SIZE_BREADBOARD,
+  HALF_SIZE_BREADBOARD,
+  LOWER_ROWS,
+  UPPER_ROWS,
+  addBreadboard,
+  breadboardHoles,
+  holeId,
+  railHoleId,
+  railSegmentOf,
+} from './netlist/breadboard.js';
+export type {
+  BreadboardRow,
+  BreadboardSpec,
+  RailPolarity,
+  RailSide,
+} from './netlist/breadboard.js';

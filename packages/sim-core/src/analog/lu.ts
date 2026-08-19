@@ -15,14 +15,19 @@
  */
 
 /**
- * Relative pivot threshold. A pivot smaller than this fraction of the largest entry seen during
- * factorisation means the matrix is numerically singular.
+ * Absolute pivot floor. Below this a column is numerically empty and the matrix is singular.
  *
- * Relative rather than absolute because MNA matrices are badly scaled by construction: a 100 MOhm
- * tri-state pin sits in the same matrix as a 25 Ohm output driver, spanning seven orders of
- * magnitude, and any fixed epsilon would be wrong at one end or the other.
+ * Deliberately absolute, not relative to the largest entry. MNA matrices span an enormous dynamic
+ * range by construction -- a 1 milliohm jumper (1e3 S) sits in the same matrix as a floating node
+ * carrying only gmin (1e-12 S), fifteen orders apart. A threshold scaled to the largest entry
+ * would put the bar at 1e-11 and declare every gmin-only node singular, which defeats the entire
+ * purpose of gmin.
+ *
+ * This is safe because partial pivoting already guarantees the chosen pivot is the largest
+ * magnitude remaining in its column: if that is below the floor, the column really is empty. A
+ * genuinely rank-deficient matrix cancels to exactly zero here, well under the floor.
  */
-const PIVOT_EPSILON = 1e-14;
+const PIVOT_FLOOR = 1e-20;
 
 export class SingularMatrixError extends Error {
   constructor(readonly column: number) {
@@ -83,14 +88,6 @@ export class DenseSolver {
     lu.set(a);
     for (let i = 0; i < n; i++) pivot[i] = i;
 
-    // Scale the singularity test to the magnitudes actually present.
-    let norm = 0;
-    for (let i = 0; i < lu.length; i++) {
-      const v = Math.abs(lu[i]!);
-      if (v > norm) norm = v;
-    }
-    const tolerance = norm * PIVOT_EPSILON;
-
     for (let k = 0; k < n; k++) {
       // Partial pivoting: the largest magnitude in the column below the diagonal.
       let best = k;
@@ -103,7 +100,7 @@ export class DenseSolver {
         }
       }
 
-      if (bestValue <= tolerance) throw new SingularMatrixError(k);
+      if (bestValue <= PIVOT_FLOOR) throw new SingularMatrixError(k);
 
       if (best !== k) {
         // Swap whole rows, and record it so `solve()` can permute the RHS to match.

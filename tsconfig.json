@@ -1,7 +1,14 @@
 {
   "files": [],
   "references": [
-    { "path": "./packages/sim-core" },
-    { "path": "./packages/compile-service" }
+    {
+      "path": "./packages/sim-core"
+    },
+    {
+      "path": "./packages/compile-service"
+    },
+    {
+      "path": "./packages/parts"
+    }
   ]
 }

@@ -13,12 +13,12 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc --build packages/sim-core packages/compile-service",
+    "build": "tsc --build packages/sim-core packages/compile-service packages/parts",
     "clean": "rm -rf packages/*/dist packages/*/*.tsbuildinfo",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --build packages/sim-core packages/compile-service && npm run typecheck:tests",
-    "typecheck:tests": "tsc -p packages/sim-core/tsconfig.test.json && tsc -p packages/compile-service/tsconfig.test.json",
+    "typecheck": "npm run build && npm run typecheck:tests",
+    "typecheck:tests": "tsc -p packages/sim-core/tsconfig.test.json && tsc -p packages/compile-service/tsconfig.test.json && tsc -p packages/parts/tsconfig.test.json",
     "verify": "npm run typecheck && npm run test",
     "image:build": "npm run image:build -w @robo-journey/compile-service",
     "fixtures:build": "npm run fixtures:build -w @robo-journey/compile-service"

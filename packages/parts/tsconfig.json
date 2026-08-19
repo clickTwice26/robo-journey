@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "./dist",
+    "types": ["node"],
+    "paths": { "@robo-journey/sim-core": ["../sim-core/src/index.ts"] }
+  },
+  "include": ["src/**/*.ts"],
+  "references": [{ "path": "../sim-core" }]
+}
