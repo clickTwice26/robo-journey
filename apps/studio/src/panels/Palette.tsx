@@ -38,7 +38,9 @@ export function PalettePanel() {
   }
 
   return (
-    <Box sx={{ height: '100%', overflow: 'auto', p: 1 }}>
+    // Capped: dockview hands a closing neighbour's width to whoever is left, and a 400 px column
+    // of buttons is not a better use of the space than the canvas.
+    <Box sx={{ height: '100%', overflow: 'auto', p: 1, maxWidth: 260 }}>
       {[...byCategory].map(([category, parts]) => (
         <Box key={category} sx={{ mb: 1.5 }}>
           <Typography variant="overline" color="text.secondary">

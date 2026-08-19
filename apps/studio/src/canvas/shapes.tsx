@@ -26,6 +26,14 @@ interface ShapeProps {
   readonly selected: boolean;
 }
 
+/**
+ * Zoom at which silkscreen text becomes legible rather than noise.
+ *
+ * Below this the labels are smaller than the sockets they name and just muddy the board, so they
+ * are not drawn at all -- hovering a pin names it at any zoom.
+ */
+export const LABEL_ZOOM_THRESHOLD = 1.1;
+
 // ---------------------------------------------------------------------------------------------
 
 export function BreadboardShape({
@@ -147,7 +155,7 @@ export function BreadboardShape({
 
 // ---------------------------------------------------------------------------------------------
 
-export function UnoShape({ part, selected }: ShapeProps) {
+export function UnoShape({ part, selected, showLabels = false }: ShapeProps & { showLabels?: boolean }) {
   const definition = partDefinition('arduino-uno');
   const width = mm(definition.width);
   const height = mm(definition.height);
@@ -214,16 +222,19 @@ export function UnoShape({ part, selected }: ShapeProps) {
               listening={false}
             />
             <Circle x={mm(pin.x)} y={mm(pin.y)} radius={1.5} fill={canvas.pinBrass} listening={false} />
-            {/* Silkscreen, rotated to run along the pin like it does on the real board. */}
-            <Text
-              x={mm(pin.x) + 2.6}
-              y={mm(pin.y) + (top ? 4.2 : -4.2)}
-              text={pin.label ?? pin.name}
-              fontSize={3.6}
-              fill="#cfeef3"
-              rotation={90}
-              listening={false}
-            />
+            {/* Silkscreen, rotated to run along the pin as it does on the real board. */}
+            {showLabels && (
+              <Text
+                x={mm(pin.x) + 2.2}
+                y={mm(pin.y) + (top ? 4.5 : -4.5)}
+                text={pin.label ?? pin.name}
+                fontSize={6}
+                fontStyle="bold"
+                fill="#f2ffff"
+                rotation={top ? 90 : -90}
+                listening={false}
+              />
+            )}
           </Group>
         );
       })}

@@ -21,6 +21,7 @@ import {
 import {
   BreadboardShape,
   ButtonShape,
+  LABEL_ZOOM_THRESHOLD,
   LedShape,
   PX_PER_MM,
   ResistorShape,
@@ -88,9 +89,9 @@ export function Workspace({ width, height, onControls }: Props & {
 
     const marginPx = 24;
     const scale = Math.min(
-      4,
+      6,
       Math.max(
-        0.2,
+        0.15,
         Math.min(
           (width - marginPx * 2) / mm(bounds.w),
           (height - marginPx * 2) / mm(bounds.h),
@@ -133,7 +134,7 @@ export function Workspace({ width, height, onControls }: Props & {
 
     setView((current) => {
       // Zoom about the cursor, so the thing under the pointer stays under the pointer.
-      const next = Math.min(4, Math.max(0.3, current.scale * (event.evt.deltaY > 0 ? 0.92 : 1.08)));
+      const next = Math.min(6, Math.max(0.15, current.scale * (event.evt.deltaY > 0 ? 0.92 : 1.08)));
       const ratio = next / current.scale;
       return {
         scale: next,
@@ -219,14 +220,38 @@ export function Workspace({ width, height, onControls }: Props & {
     [movePart, addWire, holes],
   );
 
+  /**
+   * Zoom about the centre of the viewport.
+   *
+   * Scaling without moving the origin zooms about the canvas origin instead, which walks the
+   * circuit off screen after two or three clicks -- the content you were looking at is exactly
+   * what you lose.
+   */
+  const zoomBy = useCallback(
+    (factor: number) => {
+      setView((current) => {
+        const next = Math.min(6, Math.max(0.15, current.scale * factor));
+        const ratio = next / current.scale;
+        const cx = width / 2;
+        const cy = height / 2;
+        return {
+          scale: next,
+          x: cx - (cx - current.x) * ratio,
+          y: cy - (cy - current.y) * ratio,
+        };
+      });
+    },
+    [width, height],
+  );
+
   // Publish the controls once they are stable, so the panel can render buttons over the stage.
   useEffect(() => {
     onControls?.({
       fit: fitToContent,
-      zoomIn: () => setView((v) => ({ ...v, scale: Math.min(4, v.scale * 1.25) })),
-      zoomOut: () => setView((v) => ({ ...v, scale: Math.max(0.2, v.scale / 1.25) })),
+      zoomIn: () => zoomBy(1.3),
+      zoomOut: () => zoomBy(1 / 1.3),
     });
-  }, [onControls, fitToContent]);
+  }, [onControls, fitToContent, zoomBy]);
 
   const wireStart = mode.kind === 'wire' ? terminals.get(mode.from) : undefined;
 
@@ -260,7 +285,9 @@ export function Workspace({ width, height, onControls }: Props & {
 
           const shape =
             part.type === 'breadboard-half' ? <BreadboardShape {...common} /> :
-            part.type === 'arduino-uno' ? <UnoShape {...common} /> :
+            part.type === 'arduino-uno' ? (
+              <UnoShape {...common} showLabels={view.scale >= LABEL_ZOOM_THRESHOLD} />
+            ) :
             part.type === 'resistor' ? <ResistorShape {...common} /> :
             part.type === 'led' ? <LedShape {...common} brightness={snapshot.brightness[part.id] ?? 0} /> :
             part.type === 'pushbutton' ? <ButtonShape {...common} /> :

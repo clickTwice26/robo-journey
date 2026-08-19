@@ -136,6 +136,68 @@ describe('Board co-simulation', () => {
     });
   });
 
+  describe('fault latching', () => {
+    it('keeps reporting an over-current that only occurs half of each blink cycle', () => {
+      // The reason latching exists. Blink drives D13 high for 500 ms and low for 500 ms, so a
+      // resistor-less LED exceeds the pin rating for exactly half the time. An instantaneous fault
+      // list would flicker at the frame rate and imply the problem had gone away -- but exceeding
+      // an absolute maximum even briefly is what kills the pin.
+      const board = blinkBoard();
+      board.circuit.add(new Led('D1', board.node('D13'), GROUND, 'red'));
+
+      // Land in the low half of the cycle, where nothing is currently wrong.
+      board.runFor(0.75);
+
+      expect(board.activeFaults).toEqual([]);
+      const latched = board.faults.find((f) => f.code === 'pin-over-current');
+      expect(latched).toBeDefined();
+      expect(latched!.subject).toBe('D13');
+    });
+
+    it('records when a fault first occurred, not when it was last seen', () => {
+      const board = blinkBoard();
+      board.circuit.add(new Led('D1', board.node('D13'), GROUND, 'red'));
+
+      board.runFor(0.05);
+      const first = board.faults.find((f) => f.code === 'pin-over-current')!.time;
+
+      board.runFor(2);
+      const afterMore = board.faults.find((f) => f.code === 'pin-over-current')!.time;
+
+      expect(afterMore).toBe(first);
+    });
+
+    it('does not duplicate a fault that recurs every cycle', () => {
+      const board = blinkBoard();
+      board.circuit.add(new Led('D1', board.node('D13'), GROUND, 'red'));
+      board.runFor(3);
+
+      const overCurrent = board.faults.filter((f) => f.code === 'pin-over-current');
+      expect(overCurrent).toHaveLength(1);
+    });
+
+    it('clears latched faults on reset', () => {
+      const board = blinkBoard();
+      board.circuit.add(new Led('D1', board.node('D13'), GROUND, 'red'));
+      board.runFor(0.05);
+      expect(board.faults.length).toBeGreaterThan(0);
+
+      board.reset();
+      expect(board.faults).toEqual([]);
+    });
+
+    it('reports no fault at all for a correctly resistored circuit', () => {
+      const board = blinkBoard();
+      const anode = board.circuit.addNode();
+      board.circuit.add(new Resistor('R1', board.node('D13'), anode, 220));
+      board.circuit.add(new Led('D1', anode, GROUND, 'red'));
+      board.runFor(2.5);
+
+      expect(board.faults).toEqual([]);
+      expect(board.activeFaults).toEqual([]);
+    });
+  });
+
   describe('pin electrical model', () => {
     it('leaves an unconnected input floating near ground, not at a defined logic level', () => {
       const board = blinkBoard();

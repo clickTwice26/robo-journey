@@ -45,7 +45,15 @@ class Simulation implements SimApi {
 
   loadProject(project: Project): void {
     this.project = project;
-    if (this.hex) this.rebuild();
+    // Rebuild whenever firmware is already loaded, so an edit to the circuit takes effect
+    // immediately rather than after the next compile. Restart from reset: the previous run's
+    // state belongs to a circuit that no longer exists.
+    if (this.hex) {
+      const wasRunning = this.running;
+      this.pause();
+      this.rebuild();
+      if (wasRunning) this.start();
+    }
   }
 
   start(): void {

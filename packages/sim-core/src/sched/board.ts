@@ -57,6 +57,15 @@ export class Board {
   /** Simulated time of the last analog solve, seconds. */
   private lastSolveTime = 0;
   private detectedFaults: Fault[] = [];
+  /**
+   * Faults that have occurred at any point since reset, keyed by code and subject.
+   *
+   * Latched deliberately. A blinking LED with no series resistor exceeds the pin's rating for half
+   * of every cycle, so an instantaneous list flickers sixty times a second and is unreadable -- and
+   * worse, it implies the problem went away. Real damage does not go away: exceeding an absolute
+   * maximum rating even briefly is what kills the pin, so once seen a fault stays until reset.
+   */
+  private readonly latchedFaults = new Map<string, Fault>();
 
   constructor(options: BoardOptions) {
     this.mcu = new Atmega328p(options);
@@ -105,8 +114,19 @@ export class Board {
     return this.supply.currentDelivered(this.circuit.system);
   }
 
-  /** Faults observed at the most recent analog solve. */
+  /**
+   * Faults observed since reset.
+   *
+   * Latched, not instantaneous -- see `latchedFaults`. Each entry carries the time it was *first*
+   * seen, and `peak` records the worst value measured, so a blinking over-current reports the
+   * current at its peak rather than whatever the last solve happened to catch.
+   */
   get faults(): readonly Fault[] {
+    return [...this.latchedFaults.values()];
+  }
+
+  /** Faults present at the most recent solve, for live indicators. */
+  get activeFaults(): readonly Fault[] {
     return this.detectedFaults;
   }
 
@@ -153,6 +173,7 @@ export class Board {
     this.lastSolveTime = 0;
     this.pinsDirty = true;
     this.detectedFaults = [];
+    this.latchedFaults.clear();
   }
 
   // -------------------------------------------------------------------------------------------
@@ -258,5 +279,12 @@ export class Board {
     }
 
     this.detectedFaults = faults;
+
+    // Latch anything new. The first sighting wins on time, so the report says when the problem
+    // started rather than when it was last observed.
+    for (const fault of faults) {
+      const key = `${fault.code}:${fault.subject}`;
+      if (!this.latchedFaults.has(key)) this.latchedFaults.set(key, fault);
+    }
   }
 }

@@ -20,12 +20,12 @@ shows a glowing LED. The real board gives you a dead pin.
 
 ## Status
 
-**M1 complete** — real firmware now drives a real circuit, and the simulator can tell you what
-would go wrong on the bench.
+**M2 complete** — there is an app. Load an example, press Run, and watch a real LED light from real
+firmware; omit the resistor and the Problems panel tells you the pin is passing 93.3 mA.
 
 - [x] **M0** Monorepo, compile service, AVR core binding, 1 Hz Blink verified
 - [x] **M1** MNA analog solver, pin electrical model, event-driven co-simulation
-- [ ] **M2** Konva workspace, breadboard wiring, Monaco editor, serial monitor
+- [x] **M2** Konva workspace, breadboard wiring, Monaco editor, serial monitor
 - [ ] **M3** Oscilloscope, logic analyzer, register inspector, fault detection
 - [ ] **M4** Part library breadth, `.rjp` project files, schematic view
 - [ ] **M5** Tauri desktop shell, teaching hooks
@@ -39,11 +39,14 @@ packages/
     src/analog/      MNA solver, LU, Newton-Raphson, device models
     src/sched/       Board -- event-driven co-simulation loop
     src/faults/      over-current, floating input
-    src/netlist/     galvanic partitioning               (M3)
+    src/netlist/     union-find nets and breadboard topology
+  parts/             component SDK, part library, project model, examples
   compile-service/   arduino-cli wrapper + diagnostics parser
+apps/
+  studio/            the app: dockview shell, Konva canvas, Monaco, xterm
 ```
 
-Currently 122 tests, all green.
+Currently 162 tests plus 3 benchmarks, all green.
 
 `sim-core` never imports React and never touches `window`. That constraint is what keeps headless
 testing cheap and makes the eventual Tauri port a packaging step rather than a rewrite.
@@ -55,8 +58,20 @@ Requires Node 20+ and Docker.
 ```bash
 npm install
 npm run image:build   # builds the pinned arduino-cli image (~2 min, once)
-npm run verify        # typecheck + full test suite
+npm run verify        # typecheck, test suite, benchmarks
 ```
+
+To run the app, start the compile service and the dev server:
+
+```bash
+npm run start -w @robo-journey/compile-service
+```
+
+```bash
+npm run dev -w @robo-journey/studio
+```
+
+Then open http://localhost:5173, pick **Examples → Blink an LED**, and press **Build & Run**.
 
 `npm run verify` is the gate: it typechecks every package and runs 32 tests, including a full-spine
 integration test that compiles Blink through Docker and asserts the emulated D13 toggles at 1 Hz.
