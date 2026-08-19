@@ -7,6 +7,10 @@
  *
  * The threshold here is the requirement itself (1.0x), not the measured figure, so this stays a
  * meaningful gate on a slow CI box rather than a flaky assertion about one developer's laptop.
+ *
+ * Run by `npm run bench`, never as part of the ordinary suite: vitest runs test files in parallel,
+ * and a wall-clock measurement taken while eleven other files compete for cores reports CPU
+ * contention rather than solver speed. The same circuit read 0.81x under load and 2.05x alone.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

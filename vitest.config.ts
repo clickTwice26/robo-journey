@@ -15,6 +15,9 @@ export default defineConfig({
   },
   test: {
     include: ['packages/*/test/**/*.test.ts'],
+    // Benchmarks are excluded here and run by `npm run bench`. Vitest runs test files in
+    // parallel, so a wall-clock assertion competing with eleven other files measures CPU
+    // contention rather than the solver -- it read 0.81x under load and 2.05x alone.
     exclude: ['**/node_modules/**', '**/dist/**'],
     // A cold AVR compile inside Docker takes a couple of seconds.
     testTimeout: 60_000,

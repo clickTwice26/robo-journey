@@ -19,9 +19,10 @@
     "test:watch": "vitest",
     "typecheck": "npm run build && npm run typecheck:tests",
     "typecheck:tests": "tsc -p packages/sim-core/tsconfig.test.json && tsc -p packages/compile-service/tsconfig.test.json && tsc -p packages/parts/tsconfig.test.json",
-    "verify": "npm run typecheck && npm run test",
+    "verify": "npm run typecheck && npm run test && npm run bench",
     "image:build": "npm run image:build -w @robo-journey/compile-service",
-    "fixtures:build": "npm run fixtures:build -w @robo-journey/compile-service"
+    "fixtures:build": "npm run fixtures:build -w @robo-journey/compile-service",
+    "bench": "vitest run --config vitest.bench.config.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
