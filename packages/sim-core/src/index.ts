@@ -61,3 +61,23 @@ export type {
   LedColor,
   StampContext,
 } from './analog/devices.js';
+
+// --- MCU / circuit coupling --------------------------------------------------------------------
+
+export { Board } from './sched/board.js';
+export type { BoardOptions } from './sched/board.js';
+
+export {
+  AvrPin,
+  INPUT_IMPEDANCE_OHMS,
+  OUTPUT_IMPEDANCE_OHMS,
+  PIN_ABSOLUTE_MAX_CURRENT,
+  PULLUP_OHMS,
+  SUPPLY_ABSOLUTE_MAX_CURRENT,
+  VIH_FACTOR,
+  VIL_FACTOR,
+} from './mcu/pin-model.js';
+export type { LogicLevel } from './mcu/pin-model.js';
+
+export { fault, formatCurrent, formatVoltage } from './faults/index.js';
+export type { Fault, FaultCode, FaultSeverity } from './faults/index.js';

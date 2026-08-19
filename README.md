@@ -20,10 +20,11 @@ shows a glowing LED. The real board gives you a dead pin.
 
 ## Status
 
-**M0 complete** — the compile → emulate → observe spine works end to end.
+**M1 complete** — real firmware now drives a real circuit, and the simulator can tell you what
+would go wrong on the bench.
 
 - [x] **M0** Monorepo, compile service, AVR core binding, 1 Hz Blink verified
-- [ ] **M1** MNA analog solver, pin electrical model, event-driven co-simulation
+- [x] **M1** MNA analog solver, pin electrical model, event-driven co-simulation
 - [ ] **M2** Konva workspace, breadboard wiring, Monaco editor, serial monitor
 - [ ] **M3** Oscilloscope, logic analyzer, register inspector, fault detection
 - [ ] **M4** Part library breadth, `.rjp` project files, schematic view
@@ -35,12 +36,14 @@ shows a glowing LED. The real board gives you a dead pin.
 packages/
   sim-core/          simulation engine — no DOM, no framework, runs headless
     src/mcu/         avr8js binding, Uno pin map, Intel HEX loader
-    src/analog/      MNA solver                          (M1)
-    src/netlist/     nets and galvanic partitioning      (M1)
-    src/sched/       event-driven co-simulation loop     (M1)
-    src/faults/      absolute-max, brownout, floating    (M1)
+    src/analog/      MNA solver, LU, Newton-Raphson, device models
+    src/sched/       Board -- event-driven co-simulation loop
+    src/faults/      over-current, floating input
+    src/netlist/     galvanic partitioning               (M3)
   compile-service/   arduino-cli wrapper + diagnostics parser
 ```
+
+Currently 122 tests, all green.
 
 `sim-core` never imports React and never touches `window`. That constraint is what keeps headless
 testing cheap and makes the eventual Tauri port a packaging step rather than a rewrite.
@@ -84,6 +87,33 @@ the loop. There is a test asserting that overshoot is *non-zero*: if it ever bec
 **`pinMode(OUTPUT)` produces an observable glitch.** Setting DDRB while PORTB is still 0 drives the
 pin LOW for ~50 cycles before `digitalWrite` raises it. That is real, a latch or MOSFET gate would
 see it, and the simulator does not smooth it away.
+
+**A pin is not HIGH or LOW, it is a stamp.** Driven high means 25 ohm to the rail; a pull-up means
+36 kOhm; tri-state means 100 MOhm of leakage. So `digitalWrite(13, HIGH)` into an LED does not put
+5.00 V on the pin -- it puts about 4.65 V, because ~14 mA through the output stage costs a third of
+a volt, exactly as a real Uno measures.
+
+**What comes back is a voltage, not a bit.** The input latch compares against VIL (0.3 VCC) and VIH
+(0.6 VCC). Between them the reading is genuinely undefined, so the simulator holds the previous
+level -- as the real Schmitt trigger does -- and separately reports a floating-input fault instead
+of quietly guessing.
+
+**Solver tolerance is tighter than SPICE's.** SPICE defaults to `RELTOL = 1e-3`, tuned for netlists
+with millions of nodes. At that setting a 5 V loop closes KVL only to about 6 mV -- wider than an
+ADC least significant bit, so a simulated multimeter would disagree with a simulated `analogRead`
+on the same node. At `1e-9` the residual is ~1e-11 V for three extra Newton iterations.
+
+**Every digital edge is a discontinuity.** Trapezoidal integration carries the previous step's
+current into the next one, which is meaningless across a jump and shows up as ringing on exactly
+the edges this simulator exists to get right. A declared discontinuity forces one damped Backward
+Euler step before returning to second-order accuracy.
+
+## Performance
+
+A ~55-node circuit with 14 LEDs and 6 dividers simulates at **2.05x real time** on an M-series Mac,
+so the TypeScript solver has roughly 2x headroom against the requirement. The Rust/WASM port stays
+in reserve; `packages/sim-core/test/performance.test.ts` is the regression guard, and it asserts
+the requirement (1.0x) rather than the measured figure so it survives a slow CI box.
 
 ## License
 
