@@ -24,6 +24,7 @@ export {
   ProjectSchema,
   emptyProject,
   parseProject,
+  partsPluggedInto,
   splitTerminal,
   terminalId,
 } from './project.js';

@@ -8,7 +8,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Circle, Group, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import type Konva from 'konva';
-import { PITCH_MM, partDefinition, terminalId, type Project } from '@robo-journey/parts';
+import {
+  PITCH_MM,
+  partDefinition,
+  partsPluggedInto,
+  terminalId,
+  type Project,
+} from '@robo-journey/parts';
 import { canvas as palette } from '../theme.ts';
 import { nextId, useStudio } from '../store.ts';
 import {
@@ -432,29 +438,6 @@ export function Workspace({ width, height, onControls, onPartContextMenu }: Prop
       </Layer>
     </Stage>
   );
-}
-
-/**
- * Parts with at least one leg in the given board's holes.
- *
- * A leg in a hole is recorded as a wire from the part's pin to `<board>:<hole>`, so plugged-in
- * parts are exactly those on the other end of such a wire.
- */
-function partsPluggedInto(project: Project, boardId: string): string[] {
-  const prefix = `${boardId}:`;
-  const attached = new Set<string>();
-
-  for (const wire of project.wires) {
-    const ends = [wire.from, wire.to];
-    const boardEnd = ends.find((end) => end.startsWith(prefix));
-    if (!boardEnd) continue;
-    const other = ends.find((end) => end !== boardEnd);
-    if (!other) continue;
-    const partId = other.slice(0, other.indexOf(':'));
-    if (partId && partId !== boardId) attached.add(partId);
-  }
-
-  return [...attached];
 }
 
 /** A wire's colour, tinted toward its measured voltage once the simulation is running. */

@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { Led, loadHex } from '@robo-journey/sim-core';
-import { buildCircuit, parseProject, type Project } from '../src/index.js';
+import { buildCircuit, parseProject, partsPluggedInto, type Project } from '../src/index.js';
 
 const blinkHex = readFileSync(
   fileURLToPath(new URL('../../sim-core/test/fixtures/blink.hex', import.meta.url)),
@@ -197,5 +197,59 @@ describe('building a project', () => {
       const project = blinkOnBreadboard();
       expect(parseProject(JSON.parse(JSON.stringify(project)))).toEqual(project);
     });
+  });
+});
+
+describe('partsPluggedInto', () => {
+  const project = parseProject({
+    version: 1,
+    parts: [
+      { id: 'uno1', type: 'arduino-uno', x: 0, y: 0 },
+      { id: 'bb1', type: 'breadboard-mini', x: 0, y: 60 },
+      { id: 'bb2', type: 'breadboard-mini', x: 0, y: 120 },
+      { id: 'r1', type: 'resistor', x: 0, y: 60 },
+      { id: 'led1', type: 'led', x: 0, y: 60 },
+      { id: 'lonely', type: 'led', x: 200, y: 200 },
+    ],
+    wires: [
+      { id: 'w1', from: 'r1:a', to: 'bb1:5B' },
+      { id: 'w2', from: 'r1:b', to: 'bb1:9B' },
+      { id: 'w3', from: 'bb1:9C', to: 'led1:anode' },
+      { id: 'w4', from: 'uno1:D13', to: 'bb1:5A' },
+      { id: 'w5', from: 'bb2:3A', to: 'bb1:12A' },
+    ],
+  });
+
+  it('finds every part with a leg in the board', () => {
+    expect(partsPluggedInto(project, 'bb1').sort()).toEqual(['bb2', 'led1', 'r1', 'uno1']);
+  });
+
+  it('works regardless of which end of the wire the board is on', () => {
+    // w1 has the board second, w3 has it first. Both must count.
+    expect(partsPluggedInto(project, 'bb1')).toContain('r1');
+    expect(partsPluggedInto(project, 'bb1')).toContain('led1');
+  });
+
+  it('does not report a part twice when it has several legs in the board', () => {
+    // r1 has both legs in bb1.
+    expect(partsPluggedInto(project, 'bb1').filter((id) => id === 'r1')).toHaveLength(1);
+  });
+
+  it('ignores parts that are not connected to that board', () => {
+    expect(partsPluggedInto(project, 'bb1')).not.toContain('lonely');
+    expect(partsPluggedInto(project, 'bb2')).toEqual(['bb1']);
+  });
+
+  it('never reports the board itself', () => {
+    const selfWired = parseProject({
+      version: 1,
+      parts: [{ id: 'bb1', type: 'breadboard-mini', x: 0, y: 0 }],
+      wires: [{ id: 'w1', from: 'bb1:1A', to: 'bb1:9A' }],
+    });
+    expect(partsPluggedInto(selfWired, 'bb1')).toEqual([]);
+  });
+
+  it('returns nothing for a board with nothing in it', () => {
+    expect(partsPluggedInto(parseProject({ version: 1 }), 'bb1')).toEqual([]);
   });
 });

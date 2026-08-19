@@ -88,3 +88,32 @@ export function splitTerminal(terminal: string): { partId: string; pin: string }
   if (index < 0) throw new Error(`Malformed terminal id "${terminal}"`);
   return { partId: terminal.slice(0, index), pin: terminal.slice(index + 1) };
 }
+
+/**
+ * Parts with at least one leg in the given board's holes.
+ *
+ * A leg in a hole is recorded as a wire from the part's pin to `<board>:<hole>`, so plugged-in
+ * parts are exactly those on the other end of such a wire.
+ *
+ * Used when a board is dragged: the holes move, so whatever is sitting in them has to move too.
+ * Leaving them behind detaches the circuit while making it look like a rendering fault.
+ */
+export function partsPluggedInto(project: Project, boardId: string): string[] {
+  const prefix = `${boardId}:`;
+  const attached = new Set<string>();
+
+  for (const wire of project.wires) {
+    const ends = [wire.from, wire.to];
+    const boardEnd = ends.find((end) => end.startsWith(prefix));
+    if (!boardEnd) continue;
+    const other = ends.find((end) => end !== boardEnd);
+    if (other === undefined) continue;
+
+    const separator = other.indexOf(':');
+    if (separator <= 0) continue;
+    const partId = other.slice(0, separator);
+    if (partId !== boardId) attached.add(partId);
+  }
+
+  return [...attached];
+}
