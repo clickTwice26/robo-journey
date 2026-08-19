@@ -5,6 +5,7 @@
  * gets firmware back. The desktop build calls `ArduinoCompiler` directly and never starts a server.
  */
 import Fastify from 'fastify';
+import { registerDatasheetRoutes } from './datasheet-route.js';
 import {
   ArduinoCompiler,
   ToolchainUnavailableError,
@@ -23,7 +24,8 @@ const cache = new Map<string, CompileResult>();
 const CACHE_LIMIT = 64;
 
 export function createServer(compiler = new ArduinoCompiler()) {
-  const app = Fastify({ logger: true });
+  // Datasheets are megabytes as base64; the default 1 MB body limit would reject every real one.
+  const app = Fastify({ logger: true, bodyLimit: 32 * 1024 * 1024 });
 
   app.post<{ Body: CompileRequest }>('/compile', async (request, reply) => {
     const body = request.body;
@@ -60,6 +62,8 @@ export function createServer(compiler = new ArduinoCompiler()) {
   });
 
   app.get('/health', async () => ({ ok: true }));
+
+  registerDatasheetRoutes(app);
 
   return app;
 }

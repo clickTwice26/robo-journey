@@ -16,7 +16,12 @@ export {
   PUSHBUTTON,
   RESISTOR,
   allParts,
+  builtinParts,
+  isRegistered,
   partDefinition,
+  registerPart,
+  registeredParts,
+  unregisterPart,
 } from './registry.js';
 export type { BuildContext, PartCategory, PartDefinition, PartPin } from './registry.js';
 
@@ -32,3 +37,25 @@ export type { PartInstance, Project, SketchFile, Wire } from './project.js';
 
 export { EXAMPLES, exampleById } from './examples.js';
 export type { Example } from './examples.js';
+
+// --- Component manifests -------------------------------------------------------------------------
+
+export { ComponentManifestSchema, parseManifest } from './manifest.js';
+export type {
+  Behavior,
+  ComponentManifest,
+  Limits,
+  ManifestPin,
+  PinModel,
+  Provenance,
+  StateVariable,
+} from './manifest.js';
+
+export { formatIssues, validateManifest } from './manifest-validate.js';
+export type { IssueSeverity, ValidationIssue, ValidationResult } from './manifest-validate.js';
+
+export {
+  ComponentState,
+  ManifestDevice,
+  manifestToPartDefinition,
+} from './manifest-runtime.js';

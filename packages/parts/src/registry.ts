@@ -253,14 +253,56 @@ const DEFINITIONS: readonly PartDefinition[] = [
 
 const BY_TYPE = new Map(DEFINITIONS.map((d) => [d.type, d]));
 
+/**
+ * Parts added at run time, from manifests.
+ *
+ * Kept separate from the built-ins so the two can be told apart in the palette and so a generated
+ * part can be replaced or removed without disturbing the library. This is the mechanism that lets
+ * the platform hold components nobody compiled in.
+ */
+const REGISTERED = new Map<string, PartDefinition>();
+
 export function partDefinition(type: string): PartDefinition {
-  const definition = BY_TYPE.get(type);
+  const definition = REGISTERED.get(type) ?? BY_TYPE.get(type);
   if (!definition) throw new Error(`Unknown part type "${type}"`);
   return definition;
 }
 
+/** Every part, built-in and registered. */
 export function allParts(): readonly PartDefinition[] {
+  return [...DEFINITIONS, ...REGISTERED.values()];
+}
+
+/** Just the built-in library. */
+export function builtinParts(): readonly PartDefinition[] {
   return DEFINITIONS;
+}
+
+/** Parts added at run time. */
+export function registeredParts(): readonly PartDefinition[] {
+  return [...REGISTERED.values()];
+}
+
+/**
+ * Add a part at run time.
+ *
+ * Refuses to shadow a built-in: a generated component quietly replacing the LED would make every
+ * existing project behave differently with no indication why.
+ */
+export function registerPart(definition: PartDefinition): void {
+  if (BY_TYPE.has(definition.type)) {
+    throw new Error(`"${definition.type}" is a built-in part and cannot be replaced`);
+  }
+  REGISTERED.set(definition.type, definition);
+}
+
+export function unregisterPart(type: string): boolean {
+  return REGISTERED.delete(type);
+}
+
+/** True when a type is registered rather than compiled in. */
+export function isRegistered(type: string): boolean {
+  return REGISTERED.has(type);
 }
 
 export {

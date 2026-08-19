@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "id": "hc-sr04",
+  "name": "HC-SR04 Ultrasonic Rangefinder",
+  "manufacturer": "Elec Freaks",
+  "partNumber": "HC-SR04",
+  "category": "sensor",
+  "description": "Ultrasonic distance sensor. Pulse TRIG for 10 us; ECHO returns high for 58 us per centimetre.",
+  "package": {
+    "type": "module",
+    "widthMm": 45,
+    "heightMm": 20,
+    "pinPitchMm": 2.54,
+    "bodyColor": "#1d3f6e"
+  },
+  "pins": [
+    { "name": "VCC",  "number": 1, "x": 0,     "y": 18, "description": "5 V supply",
+      "model": { "kind": "power", "vNom": 5, "vMin": 4.5, "vMax": 5.5, "iQuiescent": 0.015 } },
+    { "name": "TRIG", "number": 2, "x": 2.54,  "y": 18, "description": "Trigger input, 10 us pulse",
+      "model": { "kind": "digital-in", "vih": 2.5, "vil": 1.0, "impedanceOhms": 100000, "pull": "none" } },
+    { "name": "ECHO", "number": 3, "x": 5.08,  "y": 18, "description": "Echo output, width encodes distance",
+      "model": { "kind": "digital-out", "impedanceOhms": 100, "sourceMaxA": 0.02, "sinkMaxA": 0.02, "openDrain": false } },
+    { "name": "GND",  "number": 4, "x": 7.62,  "y": 18, "description": "Ground",
+      "model": { "kind": "ground" } }
+  ],
+  "state": [
+    { "name": "distanceCm", "label": "Distance", "unit": "cm", "min": 2, "max": 400, "default": 40, "step": 1 }
+  ],
+  "behavior": {
+    "kind": "pulse-echo",
+    "triggerPin": "TRIG",
+    "echoPin": "ECHO",
+    "state": "distanceCm",
+    "minTriggerSeconds": 0.00001,
+    "responseDelaySeconds": 0.00046,
+    "secondsPerUnit": 0.000058,
+    "timeoutSeconds": 0.038
+  },
+  "limits": {
+    "vccMinVolts": 4.5,
+    "vccMaxVolts": 5.5,
+    "pinMaxAmps": 0.02,
+    "totalMaxAmps": 0.02,
+    "operatingTempMinC": -15,
+    "operatingTempMaxC": 70
+  },
+  "provenance": {
+    "source": "hand-written",
+    "datasheetName": "HC-SR04 Ultrasonic Ranging Module",
+    "unresolved": ["ECHO output impedance is not specified; 100 ohm assumed"],
+    "verified": true
+  }
+}

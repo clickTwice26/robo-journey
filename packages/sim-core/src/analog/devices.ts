@@ -68,6 +68,16 @@ export interface Device {
   stamp(ctx: StampContext): void;
   /** Latch state after a converged solve: capacitor voltage, inductor current, and so on. */
   commit?(ctx: StampContext): void;
+  /**
+   * Next moment this device changes on its own, in seconds since reset, or null if it is passive
+   * in time.
+   *
+   * The scheduler consults this so it can stop exactly at a device's own edges rather than at the
+   * next interval tick. A rangefinder's echo pulse and a servo's frame boundary are as much
+   * discontinuities as a GPIO write, and sampling them on a fixed clock smears the very timing the
+   * sketch is measuring.
+   */
+  nextEventTime?(now: number): number | null;
   /** Return to the power-on state. */
   reset?(): void;
 }

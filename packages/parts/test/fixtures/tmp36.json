@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "tmp36",
+  "name": "TMP36 Temperature Sensor",
+  "manufacturer": "Analog Devices",
+  "partNumber": "TMP36",
+  "category": "sensor",
+  "description": "Analog temperature sensor. 10 mV per degree C with a 500 mV offset at 0 C.",
+  "package": { "type": "TO-92", "widthMm": 5, "heightMm": 5, "pinPitchMm": 2.54, "bodyColor": "#2b2b2b" },
+  "pins": [
+    { "name": "VS",   "number": 1, "x": 0,    "y": 4, "description": "Supply, 2.7 to 5.5 V",
+      "model": { "kind": "power", "vNom": 5, "vMin": 2.7, "vMax": 5.5, "iQuiescent": 0.00005 } },
+    { "name": "VOUT", "number": 2, "x": 2.54, "y": 4, "description": "Analog output",
+      "model": { "kind": "analog-out", "impedanceOhms": 1000 } },
+    { "name": "GND",  "number": 3, "x": 5.08, "y": 4, "description": "Ground",
+      "model": { "kind": "ground" } }
+  ],
+  "state": [
+    { "name": "temperatureC", "label": "Temperature", "unit": "C", "min": -40, "max": 125, "default": 25, "step": 0.5 }
+  ],
+  "behavior": {
+    "kind": "analog-sensor",
+    "outputPin": "VOUT",
+    "state": "temperatureC",
+    "voltsPerUnit": 0.01,
+    "offsetVolts": 0.5,
+    "clampToSupply": true
+  },
+  "limits": { "vccMinVolts": 2.7, "vccMaxVolts": 5.5, "pinMaxAmps": 0.05 },
+  "provenance": { "source": "hand-written", "datasheetName": "TMP36 Rev H", "unresolved": [], "verified": true }
+}

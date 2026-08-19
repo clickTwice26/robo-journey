@@ -5,10 +5,10 @@ const src = (pkg: string) =>
   fileURLToPath(new URL(`./packages/${pkg}/src/index.ts`, import.meta.url));
 
 /**
- * Benchmarks, run alone.
+ * Live tests: these call external APIs and cost money.
  *
- * `fileParallelism: false` and a single fork are the whole point: a real-time assertion is only
- * meaningful when the process is not fighting the rest of the suite for cores.
+ * Kept out of the default suite so `npm test` stays free, fast and offline. They skip themselves
+ * when no API key is present, so a checkout without one still runs green rather than red.
  */
 export default defineConfig({
   resolve: {
@@ -19,10 +19,8 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['packages/*/test/**/*.bench.ts'],
+    include: ['packages/*/test/**/*.live.ts'],
     fileParallelism: false,
-    maxWorkers: 1,
-    minWorkers: 1,
-    testTimeout: 120_000,
+    testTimeout: 180_000,
   },
 });

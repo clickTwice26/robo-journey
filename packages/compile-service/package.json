@@ -2,7 +2,7 @@
   "name": "@robo-journey/compile-service",
   "version": "0.0.0",
   "private": true,
-  "description": "Compiles Arduino sketches to firmware via arduino-cli, and maps compiler diagnostics back to source lines.",
+  "description": "Compiles Arduino sketches via arduino-cli and extracts component manifests from datasheets. Holds the API key so the browser never sees it.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -17,10 +17,12 @@
     "build": "tsc --build",
     "image:build": "docker build -t robo-journey/arduino-cli:latest .",
     "fixtures:build": "npm run build && node dist/build-fixtures.js",
-    "start": "node --experimental-strip-types src/server.ts"
+    "start": "node --env-file-if-exists=../../.env dist/server.js"
   },
   "dependencies": {
-    "fastify": "^5.2.0"
+    "fastify": "^5.2.0",
+    "@robo-journey/datasheet": "*",
+    "@robo-journey/parts": "*"
   },
   "devDependencies": {
     "@robo-journey/sim-core": "*"

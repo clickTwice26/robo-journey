@@ -84,6 +84,22 @@ export class Circuit {
     return this.devices;
   }
 
+  /**
+   * Earliest moment any device changes on its own, or null when none do.
+   *
+   * The scheduler uses this to place its next checkpoint, so a timed device's edges land where the
+   * device puts them rather than wherever the interval tick happened to fall.
+   */
+  nextDeviceEvent(now: number): number | null {
+    let earliest: number | null = null;
+    for (const device of this.devices) {
+      const at = device.nextEventTime?.(now);
+      if (at === null || at === undefined || at <= now) continue;
+      if (earliest === null || at < earliest) earliest = at;
+    }
+    return earliest;
+  }
+
   get nodes(): number {
     return this.nodeCount;
   }

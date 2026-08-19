@@ -13,16 +13,17 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc --build packages/sim-core packages/compile-service packages/parts",
+    "build": "tsc --build packages/sim-core packages/compile-service packages/parts packages/datasheet",
     "clean": "rm -rf packages/*/dist packages/*/*.tsbuildinfo",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "npm run build && npm run typecheck:tests",
-    "typecheck:tests": "tsc -p packages/sim-core/tsconfig.test.json && tsc -p packages/compile-service/tsconfig.test.json && tsc -p packages/parts/tsconfig.test.json",
+    "typecheck:tests": "tsc -p packages/sim-core/tsconfig.test.json && tsc -p packages/compile-service/tsconfig.test.json && tsc -p packages/parts/tsconfig.test.json && tsc -p packages/datasheet/tsconfig.test.json",
     "verify": "npm run typecheck && npm run test && npm run bench",
     "image:build": "npm run image:build -w @robo-journey/compile-service",
     "fixtures:build": "npm run fixtures:build -w @robo-journey/compile-service",
-    "bench": "vitest run --config vitest.bench.config.ts"
+    "bench": "vitest run --config vitest.bench.config.ts",
+    "test:live": "node --env-file-if-exists=.env ./node_modules/.bin/vitest run --config vitest.live.config.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

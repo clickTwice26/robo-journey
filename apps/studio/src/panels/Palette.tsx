@@ -15,8 +15,11 @@ import {
   Typography,
 } from '@mui/material';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlineOutlined';
-import { allParts, partDefinition } from '@robo-journey/parts';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import { useState } from 'react';
+import { allParts, isRegistered, partDefinition } from '@robo-journey/parts';
 import { useStudio } from '../store.ts';
+import { DatasheetDialog } from './DatasheetDialog.tsx';
 
 const CATEGORY_LABELS: Record<string, string> = {
   board: 'Boards',
@@ -29,7 +32,11 @@ const CATEGORY_LABELS: Record<string, string> = {
 export function PalettePanel() {
   const mode = useStudio((s) => s.mode);
   const setMode = useStudio((s) => s.setMode);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  // Bumping this re-reads the registry after a component is added at run time.
+  const [generation, setGeneration] = useState(0);
 
+  void generation;
   const byCategory = new Map<string, ReturnType<typeof allParts>[number][]>();
   for (const part of allParts()) {
     const list = byCategory.get(part.category) ?? [];
@@ -41,6 +48,23 @@ export function PalettePanel() {
     // Capped: dockview hands a closing neighbour's width to whoever is left, and a 400 px column
     // of buttons is not a better use of the space than the canvas.
     <Box sx={{ height: '100%', overflow: 'auto', p: 1, maxWidth: 260 }}>
+      <Button
+        fullWidth
+        variant="outlined"
+        color="primary"
+        startIcon={<AutoAwesomeIcon />}
+        onClick={() => setDialogOpen(true)}
+        sx={{ mb: 1.5 }}
+      >
+        From datasheet
+      </Button>
+
+      <DatasheetDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        onAdded={() => setGeneration((g) => g + 1)}
+      />
+
       {[...byCategory].map(([category, parts]) => (
         <Box key={category} sx={{ mb: 1.5 }}>
           <Typography variant="overline" color="text.secondary">
@@ -52,7 +76,10 @@ export function PalettePanel() {
                 key={part.type}
                 variant={mode.kind === 'place' && mode.partType === part.type ? 'contained' : 'outlined'}
                 onClick={() => setMode({ kind: 'place', partType: part.type })}
-                sx={{ justifyContent: 'flex-start' }}
+                sx={{ justifyContent: 'flex-start', textAlign: 'left' }}
+                // Generated parts are marked in the palette itself, not only in the dialog that
+                // made them -- otherwise the distinction disappears the moment it matters.
+                endIcon={isRegistered(part.type) ? <AutoAwesomeIcon sx={{ fontSize: 14 }} /> : undefined}
               >
                 {part.label}
               </Button>

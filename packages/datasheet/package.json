@@ -1,0 +1,17 @@
+{
+  "name": "@robo-journey/datasheet",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Extracts component manifests from datasheets using Gemini. Server-side only: the API key never reaches the browser.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": { "build": "tsc --build" },
+  "dependencies": {
+    "@google/genai": "^2.17.1",
+    "@robo-journey/parts": "*",
+    "zod": "^4.4.3"
+  }
+}

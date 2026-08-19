@@ -224,9 +224,17 @@ export class Board {
         ? this.mcu.usartTx.nextEdgeCycle(this.mcu.cycles)
         : null;
 
+      // Timed components -- a rangefinder's echo, a servo's frame -- schedule their own edges the
+      // same way the UART does. Stopping there keeps a sketch's pulseIn() measuring a real width
+      // rather than one rounded to the interval.
+      const deviceEvent = this.circuit.nextDeviceEvent(this.mcu.time);
+      const deviceCycle =
+        deviceEvent !== null ? Math.ceil(deviceEvent * this.mcu.clockHz) : Number.POSITIVE_INFINITY;
+
       const checkpoint = Math.min(
         this.mcu.cycles + intervalCycles,
         txEdge !== null && txEdge > this.mcu.cycles ? txEdge : Number.POSITIVE_INFINITY,
+        deviceCycle > this.mcu.cycles ? deviceCycle : Number.POSITIVE_INFINITY,
         targetCycle,
       );
 

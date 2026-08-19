@@ -18,7 +18,9 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // The browser cannot run avr-gcc, so compilation goes to the local service.
-      '/api/compile': { target: 'http://127.0.0.1:4747', rewrite: (p) => p.replace(/^\/api/, '') },
+      // Everything under /api goes to the local service, which holds the Gemini key so the
+      // browser never does.
+      '/api': { target: 'http://127.0.0.1:4747', rewrite: (p) => p.replace(/^\/api/, '') },
     },
   },
   worker: { format: 'es' },

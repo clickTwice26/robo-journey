@@ -20,6 +20,10 @@ shows a glowing LED. The real board gives you a dead pin.
 
 ## Status
 
+**M4 complete** — the platform holds components nobody compiled in. Paste or upload a datasheet and
+it becomes a working part: pins, electrical models, timing and limits, validated against physics
+before it is allowed near a circuit.
+
 **M3 complete** — the app now measures as well as simulates. Scope and logic analyser on uPlot,
 named register inspector, and a serial decoder that reads bytes back off the voltage on D1 rather
 than from the peripheral that sent them.
@@ -27,8 +31,9 @@ than from the peripheral that sent them.
 - [x] **M0** Monorepo, compile service, AVR core binding, 1 Hz Blink verified
 - [x] **M1** MNA analog solver, pin electrical model, event-driven co-simulation
 - [x] **M2** Konva workspace, breadboard wiring, Monaco editor, serial monitor
-- [x] **M3** Oscilloscope, logic analyser with serial decode, register inspector, fault detection
-- [ ] **M4** Part library breadth, `.rjp` project files, schematic view
+- [x] **M3** Oscilloscope, logic analyser with serial decode, register inspector, disassembler, breakpoints
+- [x] **M4** Data-driven component manifests, and datasheet extraction with Gemini
+- [ ] **M5** Tauri desktop shell, teaching hooks
 - [ ] **M5** Tauri desktop shell, teaching hooks
 
 ## Layout
@@ -134,6 +139,44 @@ on the same node. At `1e-9` the residual is ~1e-11 V for three extra Newton iter
 current into the next one, which is meaningless across a jump and shows up as ringing on exactly
 the edges this simulator exists to get right. A declared discontinuity forces one damped Backward
 Euler step before returning to second-order accuracy.
+
+## Components from datasheets
+
+A component is data, not code. `packages/parts/src/manifest.ts` describes one: its package and
+pins, an electrical model per pin, one of eight behaviour archetypes, its absolute maximum ratings,
+and its provenance. Anything expressible there simulates, and nothing else can be expressed — a
+manifest cannot describe physics the solver has no way to compute.
+
+That makes extraction possible. Gemini reads a datasheet and returns a manifest, which is then:
+
+1. parsed by zod, so it is structurally valid;
+2. checked against physics by `validateManifest`, which catches what a schema cannot — VIL above
+   VIH, a pin sourcing 40 amps, an SDA reference to a pin that does not exist, a reserved I²C
+   address, an active part with no ground;
+3. handed back to the model with the specific failures if either check fails, because naming the
+   error fixes it far more reliably than asking for another attempt.
+
+**Extraction is never trusted.** Every generated manifest carries an `unresolved` list naming each
+value the datasheet did not state and the assumption made instead, and it is marked unverified
+until a human says otherwise. A populated `unresolved` list is a successful extraction; a silently
+invented number is a failed one nobody will catch. The prompt says so explicitly, and the UI shows
+the list before you can add the part.
+
+The unit table in the prompt exists for one reason: datasheets quote milliamps, microseconds and
+kilohms, the schema wants amps, seconds and ohms, and a 20 mA pin recorded as 20 A passes every
+structural check while making the simulated part brown out a board the real one would not.
+
+Verified end to end: an HC-SR04 datasheet becomes a manifest whose echo pulse measures 580.1 µs at
+10 cm, 2320.1 µs at 40 cm and 8700.1 µs at 150 cm — exact against the module's own 58 µs/cm — with
+real compiled firmware calling `pulseIn` and printing the right distance.
+
+**The API key stays server-side.** The browser posts the datasheet to the compile service, which
+holds the key. A key in a frontend bundle is a published key.
+
+```bash
+cp .env.example .env    # then add your GEMINI_API_KEY
+npm run test:live       # runs the extraction tests; skips itself without a key
+```
 
 ## Performance
 
