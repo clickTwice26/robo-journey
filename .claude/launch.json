@@ -5,7 +5,7 @@
       "name": "studio",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "-w", "@robo-journey/studio"],
-      "port": 5173
+      "port": 28611
     }
   ]
 }

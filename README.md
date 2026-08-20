@@ -70,14 +70,19 @@ npm run verify        # typecheck, test suite, benchmarks
 To run the app, start the compile service and the dev server:
 
 ```bash
-npm run start -w @robo-journey/compile-service
+npm run service
 ```
 
 ```bash
-npm run dev -w @robo-journey/studio
+npm run dev
 ```
 
-Then open http://localhost:5173, pick **Examples → Blink an LED**, and press **Build & Run**.
+Then open http://localhost:28611, pick **Examples → Blink an LED**, and press **Build & Run**.
+
+The ports (28610 for the service, 28611 for the app) sit well away from the crowded defaults so
+this can run beside other projects. Override `RJ_SERVICE_PORT` and `RJ_STUDIO_PORT` in `.env` if
+that range is taken, and update `.claude/launch.json` to match. The dev server uses `strictPort`,
+so a collision fails loudly rather than silently moving somewhere the API proxy is not looking.
 
 `npm run verify` is the gate: it typechecks every package and runs 32 tests, including a full-spine
 integration test that compiles Blink through Docker and asserts the emulated D13 toggles at 1 Hz.

@@ -23,7 +23,9 @@
     "image:build": "npm run image:build -w @robo-journey/compile-service",
     "fixtures:build": "npm run fixtures:build -w @robo-journey/compile-service",
     "bench": "vitest run --config vitest.bench.config.ts",
-    "test:live": "node --env-file-if-exists=.env ./node_modules/.bin/vitest run --config vitest.live.config.ts"
+    "test:live": "node --env-file-if-exists=.env ./node_modules/.bin/vitest run --config vitest.live.config.ts",
+    "dev": "npm run dev -w @robo-journey/studio",
+    "service": "npm run start -w @robo-journey/compile-service"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

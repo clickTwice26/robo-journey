@@ -13,7 +13,14 @@ import {
   type CompileResult,
 } from './compiler.js';
 
-const PORT = Number(process.env.PORT ?? 4747);
+/**
+ * Ports.
+ *
+ * Deliberately away from the crowded defaults -- 3000, 5000, 5173, 8080 -- so running this
+ * alongside other projects does not need anyone to remember which one grabbed a port first.
+ * Overridable through `.env`; if you change them there, update `.claude/launch.json` to match.
+ */
+const PORT = Number(process.env.RJ_SERVICE_PORT ?? process.env.PORT ?? 28610);
 const HOST = process.env.HOST ?? '127.0.0.1';
 
 /**
