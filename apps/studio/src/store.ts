@@ -23,8 +23,22 @@ export interface Diagnostic {
 /** What the canvas is currently doing, which determines how clicks are interpreted. */
 export type CanvasMode = { kind: 'select' } | { kind: 'wire'; from: string } | { kind: 'place'; partType: string };
 
+/**
+ * Undo depth.
+ *
+ * Deep enough to walk back out of a wrong turn, shallow enough that a hundred project snapshots
+ * never become the largest thing in memory. Projects are small -- parts, wires and sketch text --
+ * so whole-document snapshots are simpler and safer here than a command log, which has to get
+ * every inverse right.
+ */
+const HISTORY_LIMIT = 100;
+
 interface StudioState {
   project: Project;
+  /** Previous project states, oldest first. */
+  past: Project[];
+  /** States undone but not yet superseded by a new edit. */
+  future: Project[];
   snapshot: SimSnapshot;
   selection: string | null;
   mode: CanvasMode;
@@ -41,7 +55,14 @@ interface StudioState {
    */
   buildError: string | null;
 
+  /** Replace the project, recording the current one for undo. */
   setProject(project: Project): void;
+  /** Replace without touching history, for loading a fresh document. */
+  loadProject(project: Project): void;
+  undo(): void;
+  redo(): void;
+  canUndo(): boolean;
+  canRedo(): boolean;
   addPart(part: PartInstance): void;
   movePart(id: string, x: number, y: number): void;
   /** Move one part to an absolute position and shift others by the same delta, in one update. */
@@ -60,8 +81,30 @@ interface StudioState {
   setBuildError(message: string | null): void;
 }
 
-export const useStudio = create<StudioState>((set) => ({
+/**
+ * Apply a change to the project while recording the previous state.
+ *
+ * Every mutator goes through this, so undo cannot be forgotten for one action and silently work
+ * for the rest -- which is the failure mode that makes an undo stack untrustworthy.
+ */
+function withHistory(
+  state: StudioState,
+  change: (project: Project) => Project,
+): Partial<StudioState> {
+  const next = change(state.project);
+  if (next === state.project) return {};
+  return {
+    project: next,
+    past: [...state.past, state.project].slice(-HISTORY_LIMIT),
+    // Any new edit discards the redo branch, as every editor does.
+    future: [],
+  };
+}
+
+export const useStudio = create<StudioState>((set, get) => ({
   project: emptyProject('Blink'),
+  past: [],
+  future: [],
   snapshot: EMPTY_SNAPSHOT,
   selection: null,
   mode: { kind: 'select' },
@@ -71,70 +114,98 @@ export const useStudio = create<StudioState>((set) => ({
   hex: null,
   buildError: null,
 
-  setProject: (project) => set({ project }),
+  setProject: (project) => set((state) => withHistory(state, () => project)),
+
+  loadProject: (project) => set({ project, past: [], future: [] }),
+
+  undo: () =>
+    set((state) => {
+      const previous = state.past[state.past.length - 1];
+      if (!previous) return {};
+      return {
+        project: previous,
+        past: state.past.slice(0, -1),
+        future: [state.project, ...state.future].slice(0, HISTORY_LIMIT),
+        selection: null,
+      };
+    }),
+
+  redo: () =>
+    set((state) => {
+      const [next, ...rest] = state.future;
+      if (!next) return {};
+      return {
+        project: next,
+        past: [...state.past, state.project].slice(-HISTORY_LIMIT),
+        future: rest,
+        selection: null,
+      };
+    }),
+
+  canUndo: () => get().past.length > 0,
+  canRedo: () => get().future.length > 0,
 
   addPart: (part) =>
-    set((state) => ({ project: { ...state.project, parts: [...state.project.parts, part] } })),
+    set((state) => withHistory(state, (p) => ({ ...p, parts: [...p.parts, part] }))),
 
   movePart: (id, x, y) =>
-    set((state) => ({
-      project: {
-        ...state.project,
-        parts: state.project.parts.map((p) => (p.id === id ? { ...p, x, y } : p)),
-      },
-    })),
+    set((state) =>
+      withHistory(state, (p) => ({
+        ...p,
+        parts: p.parts.map((part) => (part.id === id ? { ...part, x, y } : part)),
+      })),
+    ),
 
   movePartWithAttached: (id, x, y, attached) =>
-    set((state) => {
-      const anchor = state.project.parts.find((p) => p.id === id);
-      if (!anchor) return state;
-      const dx = x - anchor.x;
-      const dy = y - anchor.y;
-      const moving = new Set(attached);
+    set((state) =>
+      withHistory(state, (project) => {
+        const anchor = project.parts.find((p) => p.id === id);
+        if (!anchor) return project;
+        const dx = x - anchor.x;
+        const dy = y - anchor.y;
+        const moving = new Set(attached);
 
-      return {
-        project: {
-          ...state.project,
-          parts: state.project.parts.map((part) => {
+        return {
+          ...project,
+          parts: project.parts.map((part) => {
             if (part.id === id) return { ...part, x, y };
             if (!moving.has(part.id)) return part;
             return { ...part, x: part.x + dx, y: part.y + dy };
           }),
-        },
-      };
-    }),
+        };
+      }),
+    ),
 
   updatePartProps: (id, props) =>
-    set((state) => ({
-      project: {
-        ...state.project,
-        parts: state.project.parts.map((p) =>
-          p.id === id ? { ...p, props: { ...p.props, ...props } } : p,
+    set((state) =>
+      withHistory(state, (p) => ({
+        ...p,
+        parts: p.parts.map((part) =>
+          part.id === id ? { ...part, props: { ...part.props, ...props } } : part,
         ),
-      },
-    })),
+      })),
+    ),
 
   removePart: (id) =>
     set((state) => ({
-      project: {
-        ...state.project,
-        parts: state.project.parts.filter((p) => p.id !== id),
+      ...withHistory(state, (p) => ({
+        ...p,
+        parts: p.parts.filter((part) => part.id !== id),
         // Removing a part must take its wires with it, or the project references dead terminals.
-        wires: state.project.wires.filter(
-          (w) => !w.from.startsWith(`${id}:`) && !w.to.startsWith(`${id}:`),
-        ),
-      },
+        wires: p.wires.filter((w) => !w.from.startsWith(`${id}:`) && !w.to.startsWith(`${id}:`)),
+      })),
       selection: null,
     })),
 
   addWire: (wire) =>
-    set((state) => ({ project: { ...state.project, wires: [...state.project.wires, wire] } })),
+    set((state) => withHistory(state, (p) => ({ ...p, wires: [...p.wires, wire] }))),
 
   removeWire: (id) =>
-    set((state) => ({
-      project: { ...state.project, wires: state.project.wires.filter((w) => w.id !== id) },
-    })),
+    set((state) => withHistory(state, (p) => ({ ...p, wires: p.wires.filter((w) => w.id !== id) }))),
 
+  // Sketch edits deliberately bypass the undo stack: Monaco has its own, far better, undo for
+  // text, and pushing a snapshot per keystroke would bury every circuit edit under a thousand
+  // character-level entries.
   setSketch: (name, contents) =>
     set((state) => ({
       project: {
