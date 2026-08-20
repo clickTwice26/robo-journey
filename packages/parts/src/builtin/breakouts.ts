@@ -48,7 +48,7 @@ export const MPU6050: ComponentManifest = {
     { name: 'gx', label: 'X rotation', unit: 'deg/s', min: -250, max: 250, default: 0, step: 1 },
     { name: 'gy', label: 'Y rotation', unit: 'deg/s', min: -250, max: 250, default: 0, step: 1 },
     { name: 'gz', label: 'Z rotation', unit: 'deg/s', min: -250, max: 250, default: 0, step: 1 },
-    { name: 'temperatureC', label: 'Die temperature', unit: 'C', min: -40, max: 85, default: 30, step: 1 },
+    { name: 'temperatureC', label: 'Die temperature', unit: 'C', min: -40, max: 85, default: 30, step: 1, quantity: 'temperature' },
   ],
   behavior: i2c(0x68, [
     // 16384 counts per g in the default +/-2 g range, 131 per degree per second at +/-250 dps.
@@ -134,7 +134,7 @@ export const DS3231: ComponentManifest = {
     18,
   ),
   state: [
-    { name: 'temperatureC', label: 'Die temperature', unit: 'C', min: -40, max: 85, default: 25, step: 1 },
+    { name: 'temperatureC', label: 'Die temperature', unit: 'C', min: -40, max: 85, default: 25, step: 1, quantity: 'temperature' },
   ],
   behavior: i2c(0x68, [
     reg(0x00, 'SECONDS'),
@@ -179,7 +179,7 @@ export const BMP280: ComponentManifest = {
     8,
   ),
   state: [
-    { name: 'temperatureC', label: 'Temperature', unit: 'C', min: -40, max: 85, default: 22, step: 0.1 },
+    { name: 'temperatureC', label: 'Temperature', unit: 'C', min: -40, max: 85, default: 22, step: 0.1, quantity: 'temperature' },
     { name: 'pressurePa', label: 'Pressure', unit: 'Pa', min: 30000, max: 110000, default: 101325, step: 10 },
   ],
   behavior: i2c(0x76, [

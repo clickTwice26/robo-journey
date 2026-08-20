@@ -93,7 +93,9 @@ export const PinModelSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('led'),
     cathodePin: z.string(),
-    color: z.enum(['red', 'yellow', 'green', 'blue', 'white']).default('red'),
+    color: z
+      .enum(['infrared', 'red', 'orange', 'yellow', 'green', 'blue', 'white', 'uv'])
+      .default('red'),
     /** Forward voltage at the datasheet's test current. */
     vf: Volts.default(2),
     ifNominalA: Amps.default(0.02),
@@ -153,6 +155,28 @@ export const StateVariableSchema = z.object({
   max: z.number(),
   default: z.number(),
   step: z.number().positive().default(1),
+  /**
+   * The physical quantity this variable *is*, when it is one the workspace can supply.
+   *
+   * Declaring it is what lets a flame placed on the canvas reach a flame sensor: the environment
+   * knows what a flame emits and the manifest knows what the sensor listens for, and neither has
+   * to know about the other. Left unset for anything the world has no way to produce -- a
+   * register's contents, an accelerometer axis -- which keeps those on their own control.
+   */
+  quantity: z
+    .enum([
+      'light',
+      'sound',
+      'temperature',
+      'flame',
+      'motion',
+      'magnet',
+      'distance',
+      'gas',
+      'moisture',
+      'vibration',
+    ])
+    .optional(),
 });
 
 // ---------------------------------------------------------------------------------------------

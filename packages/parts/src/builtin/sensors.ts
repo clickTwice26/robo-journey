@@ -28,7 +28,7 @@ export const PHOTORESISTOR: ComponentManifest = {
     ],
     5,
   ),
-  state: [{ name: 'lux', label: 'Light', unit: 'lux', min: 0, max: 1000, default: 100, step: 1 }],
+  state: [{ name: 'lux', label: 'Light', unit: 'lux', min: 0, max: 1000, default: 100, step: 1, quantity: 'light' }],
   behavior: {
     kind: 'variable-resistor',
     pinA: 'A',
@@ -63,7 +63,7 @@ export const THERMISTOR_10K: ComponentManifest = {
     4.5,
   ),
   state: [
-    { name: 'temperatureC', label: 'Temperature', unit: 'C', min: -20, max: 120, default: 25, step: 1 },
+    { name: 'temperatureC', label: 'Temperature', unit: 'C', min: -20, max: 120, default: 25, step: 1, quantity: 'temperature' },
   ],
   behavior: {
     kind: 'variable-resistor',
@@ -99,7 +99,7 @@ export const TMP36: ComponentManifest = {
     5.5,
   ),
   state: [
-    { name: 'temperatureC', label: 'Temperature', unit: 'C', min: -40, max: 125, default: 25, step: 1 },
+    { name: 'temperatureC', label: 'Temperature', unit: 'C', min: -40, max: 125, default: 25, step: 1, quantity: 'temperature' },
   ],
   behavior: {
     kind: 'analog-sensor',
@@ -133,7 +133,7 @@ export const LM35: ComponentManifest = {
     5.5,
   ),
   state: [
-    { name: 'temperatureC', label: 'Temperature', unit: 'C', min: 0, max: 100, default: 25, step: 1 },
+    { name: 'temperatureC', label: 'Temperature', unit: 'C', min: 0, max: 100, default: 25, step: 1, quantity: 'temperature' },
   ],
   behavior: {
     kind: 'analog-sensor',
@@ -168,7 +168,7 @@ export const HC_SR04: ComponentManifest = {
     ],
     17,
   ),
-  state: [{ name: 'distanceCm', label: 'Distance', unit: 'cm', min: 2, max: 400, default: 40, step: 1 }],
+  state: [{ name: 'distanceCm', label: 'Distance', unit: 'cm', min: 2, max: 400, default: 40, step: 1, quantity: 'distance' }],
   behavior: {
     kind: 'pulse-echo',
     triggerPin: 'TRIG',
@@ -204,7 +204,7 @@ export const PIR_HC_SR501: ComponentManifest = {
     ],
     20,
   ),
-  state: [{ name: 'motion', label: 'Movement in view', unit: '', min: 0, max: 1, default: 0, step: 1 }],
+  state: [{ name: 'motion', label: 'Movement in view', unit: '', min: 0, max: 1, default: 0, step: 1, quantity: 'motion' }],
   behavior: {
     kind: 'threshold-switch',
     outputPin: 'OUT',
@@ -239,7 +239,7 @@ export const HALL_A3144: ComponentManifest = {
     ],
     5.5,
   ),
-  state: [{ name: 'magnet', label: 'Magnet present', unit: '', min: 0, max: 1, default: 0, step: 1 }],
+  state: [{ name: 'magnet', label: 'Magnet present', unit: '', min: 0, max: 1, default: 0, step: 1, quantity: 'magnet' }],
   behavior: {
     kind: 'threshold-switch',
     outputPin: 'OUT',
@@ -273,7 +273,7 @@ export const REED_SWITCH: ComponentManifest = {
     ],
     12,
   ),
-  state: [{ name: 'magnet', label: 'Magnet near', unit: '', min: 0, max: 1, default: 0, step: 1 }],
+  state: [{ name: 'magnet', label: 'Magnet near', unit: '', min: 0, max: 1, default: 0, step: 1, quantity: 'magnet' }],
   behavior: {
     kind: 'threshold-switch',
     outputPin: 'DO',
@@ -303,7 +303,7 @@ export const SOIL_MOISTURE: ComponentManifest = {
     ],
     36,
   ),
-  state: [{ name: 'moisture', label: 'Moisture', unit: '%', min: 0, max: 100, default: 40, step: 1 }],
+  state: [{ name: 'moisture', label: 'Moisture', unit: '%', min: 0, max: 100, default: 40, step: 1, quantity: 'moisture' }],
   behavior: {
     kind: 'analog-sensor',
     outputPin: 'AOUT',
@@ -339,7 +339,7 @@ export const MQ2_GAS: ComponentManifest = {
     ],
     18,
   ),
-  state: [{ name: 'ppm', label: 'Gas', unit: 'ppm', min: 200, max: 10000, default: 400, step: 50 }],
+  state: [{ name: 'ppm', label: 'Gas', unit: 'ppm', min: 200, max: 10000, default: 400, step: 50, quantity: 'gas' }],
   behavior: {
     kind: 'analog-sensor',
     outputPin: 'AOUT',
@@ -355,6 +355,140 @@ export const MQ2_GAS: ComponentManifest = {
   ]),
 };
 
+/**
+ * Infrared flame sensor.
+ *
+ * The photodiode with the black lens that comes in every starter kit. It responds to the infrared
+ * a flame gives off, over a cone of about sixty degrees, and it is fooled by sunlight and by
+ * incandescent bulbs for exactly the same reason it works at all -- both are full of infrared.
+ */
+export const FLAME_SENSOR: ComponentManifest = {
+  schemaVersion: 1,
+  id: 'flame-sensor',
+  name: 'Flame Sensor (IR)',
+  manufacturer: 'Generic',
+  partNumber: 'KY-026',
+  category: 'sensor',
+  description: 'Infrared flame detector. Analog output rises as the fire gets closer.',
+  package: headerModule(4, 15, '#3d1f1f'),
+  pins: row(
+    [
+      { name: 'VCC', model: power(5, { vMin: 3.3, vMax: 5.5, iQuiescent: 0.015 }), description: 'Supply' },
+      { name: 'GND', model: ground(), description: 'Ground' },
+      { name: 'AOUT', model: analogOut(1000), description: 'Analog output' },
+      { name: 'DOUT', model: digitalOut({ sourceMaxA: 0.01, sinkMaxA: 0.01 }), description: 'Threshold output' },
+    ],
+    11,
+  ),
+  state: [
+    { name: 'flame', label: 'Flame', unit: '', min: 0, max: 1, default: 0, step: 0.01, quantity: 'flame' },
+  ],
+  behavior: {
+    kind: 'analog-sensor',
+    outputPin: 'AOUT',
+    state: 'flame',
+    voltsPerUnit: 4.5,
+    offsetVolts: 0.2,
+    clampToSupply: true,
+  },
+  limits: { vccMaxVolts: 5.5, vccMinVolts: 3.3, pinMaxAmps: 0.01 },
+  provenance: builtin([
+    'DOUT is declared but not driven; the comparator and its trim pot are not modelled, so use ' +
+      'AOUT and compare in the sketch.',
+    'A real one cannot tell a flame from sunlight or a filament lamp. Here it responds only to a ' +
+      'flame, which makes it easier to work with and less honest about where it fails.',
+  ]),
+};
+
+/**
+ * Microphone module.
+ *
+ * Sound level, not sound. The analog output follows how loud it is, which is all these modules
+ * really give you -- they are envelope detectors, and any sketch trying to read a waveform off one
+ * is reading noise.
+ */
+export const SOUND_SENSOR: ComponentManifest = {
+  schemaVersion: 1,
+  id: 'sound-sensor',
+  name: 'Sound Sensor (microphone)',
+  manufacturer: 'Generic',
+  partNumber: 'KY-038',
+  category: 'sensor',
+  description: 'Electret microphone with an amplifier. Analog output tracks loudness.',
+  package: headerModule(4, 15, '#2a2a35'),
+  pins: row(
+    [
+      { name: 'VCC', model: power(5, { vMin: 3.3, vMax: 5.5, iQuiescent: 0.005 }), description: 'Supply' },
+      { name: 'GND', model: ground(), description: 'Ground' },
+      { name: 'AOUT', model: analogOut(1000), description: 'Analog output' },
+      { name: 'DOUT', model: digitalOut({ sourceMaxA: 0.01, sinkMaxA: 0.01 }), description: 'Threshold output' },
+    ],
+    11,
+  ),
+  state: [
+    { name: 'soundDb', label: 'Sound level', unit: 'dB', min: 30, max: 110, default: 40, step: 1, quantity: 'sound' },
+  ],
+  behavior: {
+    kind: 'analog-sensor',
+    outputPin: 'AOUT',
+    state: 'soundDb',
+    // Quiet room to a shout across the ADC's range: 30 dB reads near zero, 110 dB near the rail.
+    voltsPerUnit: 0.055,
+    offsetVolts: -1.5,
+    clampToSupply: true,
+  },
+  limits: { vccMaxVolts: 5.5, vccMinVolts: 3.3, pinMaxAmps: 0.01 },
+  provenance: builtin([
+    'The output is a level, not a waveform. Frequency is not modelled at all, so a sketch cannot ' +
+      'tell a whistle from a shout of the same loudness.',
+    'DOUT is declared but not driven; the on-board comparator is not modelled.',
+  ]),
+};
+
+/**
+ * Vibration sensor.
+ *
+ * A spring inside a tube: shake it and the spring touches the wall, closing the contact. Which is
+ * why it detects a knock beautifully and a steady tilt not at all.
+ */
+export const VIBRATION_SENSOR: ComponentManifest = {
+  schemaVersion: 1,
+  id: 'vibration-sensor',
+  name: 'Vibration Sensor',
+  manufacturer: 'Generic',
+  partNumber: 'SW-420',
+  category: 'sensor',
+  description: 'Spring vibration switch. Output changes while it is being shaken.',
+  package: headerModule(3, 15, '#2f2a1f'),
+  pins: row(
+    [
+      { name: 'VCC', model: power(5, { vMin: 3.3, vMax: 5.5, iQuiescent: 0.015 }), description: 'Supply' },
+      { name: 'GND', model: ground(), description: 'Ground' },
+      { name: 'DO', model: digitalOut({ sourceMaxA: 0.01, sinkMaxA: 0.01 }), description: 'Digital output' },
+    ],
+    11,
+  ),
+  state: [
+    { name: 'shake', label: 'Vibration', unit: '', min: 0, max: 1, default: 0, step: 0.01, quantity: 'vibration' },
+  ],
+  behavior: {
+    kind: 'threshold-switch',
+    outputPin: 'DO',
+    state: 'shake',
+    threshold: 0.35,
+    activeLow: true,
+    // A real spring rattles; without hysteresis the output would chatter on every solve near the
+    // threshold and a sketch counting edges would count nonsense.
+    hysteresis: 0.1,
+  },
+  limits: { vccMaxVolts: 5.5, vccMinVolts: 3.3, pinMaxAmps: 0.02 },
+  provenance: builtin([
+    'The output follows the vibration level directly. A real SW-420 produces a burst of ragged ' +
+      'pulses while it is shaken, which is why sketches for it count edges over a window rather ' +
+      'than reading the pin once.',
+  ]),
+};
+
 export const SENSORS: readonly ComponentManifest[] = [
   PHOTORESISTOR,
   THERMISTOR_10K,
@@ -366,4 +500,7 @@ export const SENSORS: readonly ComponentManifest[] = [
   REED_SWITCH,
   SOIL_MOISTURE,
   MQ2_GAS,
+  FLAME_SENSOR,
+  SOUND_SENSOR,
+  VIBRATION_SENSOR,
 ];

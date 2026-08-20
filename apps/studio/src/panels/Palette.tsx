@@ -15,6 +15,9 @@ import {
   Box,
   Button,
   Collapse,
+  FormControlLabel,
+  Slider,
+  Switch,
   Divider,
   InputAdornment,
   MenuItem,
@@ -28,7 +31,13 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import SearchIcon from '@mui/icons-material/Search';
 import { useMemo, useState } from 'react';
-import { allParts, partDefinition, type PartDefinition } from '@robo-journey/parts';
+import {
+  EMISSIONS,
+  allParts,
+  partDefinition,
+  type PartDefinition,
+  type PartInstance,
+} from '@robo-journey/parts';
 import { useStudio } from '../store.ts';
 import { DatasheetDialog } from './DatasheetDialog.tsx';
 import type { SimulationController } from '../sim/useSimulation.ts';
@@ -40,10 +49,11 @@ const CATEGORY_LABELS: Record<string, string> = {
   input: 'Input',
   power: 'Power',
   instrument: 'Instruments',
+  stimulus: 'Interaction toolkit',
 };
 
 /** The order the device bar reads in, rather than whatever order the registry happens to hold. */
-const CATEGORY_ORDER = ['board', 'instrument', 'input', 'output', 'passive', 'power'];
+const CATEGORY_ORDER = ['board', 'stimulus', 'instrument', 'input', 'output', 'passive', 'power'];
 
 /** A part matches a query on its name or its type, which is what people actually type. */
 const matches = (part: PartDefinition, query: string): boolean =>
@@ -57,7 +67,12 @@ export function PalettePanel({ sim }: { sim: SimulationController }) {
   const [query, setQuery] = useState('');
   // Boards first and open, because that is where every project starts. The rest are one click
   // away rather than a scroll away.
-  const [open, setOpen] = useState<Record<string, boolean>>({ board: true, instrument: true, input: true });
+  const [open, setOpen] = useState<Record<string, boolean>>({
+    board: true,
+    stimulus: true,
+    instrument: true,
+    input: true,
+  });
   // Bumping this re-reads the registry after a component is added at run time.
   const [generation, setGeneration] = useState(0);
 
@@ -186,6 +201,173 @@ export function PalettePanel({ sim }: { sim: SimulationController }) {
   );
 }
 
+/**
+ * Sliders for whatever the world supplies a part.
+ *
+ * Every sensor in the library declares what it senses, so this is one control per declared
+ * quantity rather than a hand-written panel per part -- which is why a component extracted from a
+ * datasheet this afternoon gets working controls without anyone touching the UI.
+ *
+ * A quantity the toolkit is currently driving shows the value it is being given and says where it
+ * came from. The slider stays live underneath, because it is the *ambient* level the stimulus adds
+ * to: a lamp brightens a room that already had some light in it.
+ */
+function SensorControls({
+  part,
+  definition,
+}: {
+  part: PartInstance;
+  definition: PartDefinition | null;
+}) {
+  const updatePartProps = useStudio((s) => s.updatePartProps);
+  const driven = useStudio((s) => s.snapshot.driven[part.id]);
+  const variables = definition?.state ?? [];
+  if (variables.length === 0) return null;
+
+  return (
+    <Stack spacing={1.5} sx={{ pt: 0.5 }}>
+      {variables.map((variable) => {
+        const ambient =
+          typeof part.props[variable.name] === 'number'
+            ? (part.props[variable.name] as number)
+            : variable.default;
+        const supplied = driven?.[variable.name];
+
+        return (
+          <Box key={variable.name}>
+            <Stack direction="row" sx={{ alignItems: 'baseline', justifyContent: 'space-between' }}>
+              <Typography variant="caption" color="text.secondary">
+                {variable.label}
+              </Typography>
+              <Typography variant="caption" color={supplied === undefined ? 'text.primary' : 'primary.main'}>
+                {(supplied ?? ambient).toFixed(variable.step < 1 ? 2 : 0)} {variable.unit}
+              </Typography>
+            </Stack>
+            <Slider
+              size="small"
+              min={variable.min}
+              max={variable.max}
+              step={variable.step}
+              value={ambient}
+              onChange={(_, value) =>
+                updatePartProps(part.id, { [variable.name]: value as number })
+              }
+            />
+            {supplied !== undefined && (
+              <Typography variant="caption" color="primary.main">
+                Driven by the toolkit; the slider sets the ambient level it adds to.
+              </Typography>
+            )}
+          </Box>
+        );
+      })}
+    </Stack>
+  );
+}
+
+/**
+ * Controls for a placed stimulus.
+ *
+ * Generated from what the object emits, so a flame gets four sliders because a flame really is
+ * four things at once, and adding a new stimulus needs no UI work at all.
+ */
+function StimulusControls({
+  part,
+  definition,
+}: {
+  part: PartInstance;
+  definition: PartDefinition | null;
+}) {
+  const updatePartProps = useStudio((s) => s.updatePartProps);
+  const emissions = EMISSIONS[part.type];
+  if (!emissions || !definition) return null;
+
+  const on = part.props.on !== false;
+  // One reach serves every emission a source has, so it is edited once rather than four times.
+  const reach = Number(part.props.reachMm ?? definition.defaults.reachMm ?? 30);
+
+  return (
+    <Stack spacing={1.5}>
+      <FormControlLabel
+        control={
+          <Switch
+            size="small"
+            checked={on}
+            onChange={(e) => updatePartProps(part.id, { on: e.target.checked })}
+          />
+        }
+        label={on ? 'On' : 'Off'}
+      />
+
+      <Box>
+        <Stack direction="row" sx={{ alignItems: 'baseline', justifyContent: 'space-between' }}>
+          <Typography variant="caption" color="text.secondary">
+            Reach (half strength)
+          </Typography>
+          <Typography variant="caption">{reach.toFixed(0)} mm</Typography>
+        </Stack>
+        <Slider
+          size="small"
+          min={5}
+          max={400}
+          step={5}
+          value={reach}
+          onChange={(_, value) => updatePartProps(part.id, { reachMm: value as number })}
+        />
+      </Box>
+
+      {emissions.map((emission) => {
+        const value = Number(
+          part.props[emission.intensityProp] ?? definition.defaults[emission.intensityProp] ?? 0,
+        );
+        const fallback = Number(definition.defaults[emission.intensityProp] ?? 1);
+        // Range from the object's own default, so a flame's 2500 ppm of smoke and its 1.0 of
+        // infrared each get a scale that suits them.
+        const max = Math.max(1, fallback * 2);
+
+        return (
+          <Box key={emission.quantity}>
+            <Stack direction="row" sx={{ alignItems: 'baseline', justifyContent: 'space-between' }}>
+              <Typography variant="caption" color="text.secondary">
+                {QUANTITY_LABELS[emission.quantity] ?? emission.quantity}
+              </Typography>
+              <Typography variant="caption">
+                {value.toFixed(max <= 2 ? 2 : 0)}
+              </Typography>
+            </Stack>
+            <Slider
+              size="small"
+              min={0}
+              max={max}
+              step={max <= 2 ? 0.05 : Math.max(1, Math.round(max / 100))}
+              value={value}
+              onChange={(_, v) => updatePartProps(part.id, { [emission.intensityProp]: v as number })}
+            />
+          </Box>
+        );
+      })}
+
+      <Typography variant="caption" color="text.secondary">
+        Drag it near a sensor. One millimetre on the canvas stands for a centimetre of world, so a
+        rangefinder pointed at an obstacle 40 mm away reads 40 cm.
+      </Typography>
+    </Stack>
+  );
+}
+
+const QUANTITY_LABELS: Record<string, string> = {
+  light: 'Light (lux)',
+  sound: 'Loudness (dB)',
+  temperature: 'Heat (C above ambient)',
+  flame: 'Infrared',
+  motion: 'Movement',
+  magnet: 'Field strength',
+  distance: 'Solidity',
+  gas: 'Smoke (ppm)',
+  moisture: 'Wetness (%)',
+  vibration: 'Shake',
+};
+
 function Inspector() {
   const selection = useStudio((s) => s.selection);
   const project = useStudio((s) => s.project);
@@ -234,15 +416,19 @@ function Inspector() {
           label="Colour"
           value={String(part.props.color ?? 'red')}
           onChange={(e) => updatePartProps(part.id, { color: e.target.value })}
-          helperText="Forward voltage follows the colour's datasheet"
+          helperText="Forward voltage follows the colour: 1.4 V infrared to 3.4 V UV"
         >
-          {['red', 'yellow', 'green', 'blue', 'white'].map((color) => (
+          {['infrared', 'red', 'orange', 'yellow', 'green', 'blue', 'white', 'uv'].map((color) => (
             <MenuItem key={color} value={color}>
               {color}
             </MenuItem>
           ))}
         </TextField>
       )}
+
+      <StimulusControls part={part} definition={definition} />
+
+      <SensorControls part={part} definition={definition} />
 
       {part.type === 'multimeter' && (
         <>

@@ -45,6 +45,12 @@ export { BUILTIN_MANIFESTS, installBuiltinManifests } from './builtin-manifests.
 
 export { INSTRUMENTS, SCOPE_CHANNELS, parseProbeChannel, probeChannel } from './instruments.js';
 
+export { CM_PER_CANVAS_MM, fieldAt, isDriven } from './environment.js';
+export type { EnvironmentSource, Quantity } from './environment.js';
+
+export { EMISSIONS, STIMULI, environmentSources, isStimulus } from './stimulus.js';
+export type { Emission } from './stimulus.js';
+
 export { EXAMPLES, exampleById } from './examples.js';
 export type { Example } from './examples.js';
 

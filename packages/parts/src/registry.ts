@@ -24,11 +24,21 @@ import {
   type BreadboardSpec,
 } from '@robo-journey/sim-core';
 import { INSTRUMENTS } from './instruments.js';
+import { STIMULI } from './stimulus.js';
+import type { StateVariable } from './manifest.js';
 
 /** Standard breadboard and header pitch: 0.1 inch. */
 export const PITCH_MM = 2.54;
 
-export type PartCategory = 'board' | 'passive' | 'output' | 'input' | 'power' | 'instrument';
+export type PartCategory =
+  | 'board'
+  | 'passive'
+  | 'output'
+  | 'input'
+  | 'power'
+  | 'instrument'
+  /** Not a component: something placed in the world for sensors to respond to. */
+  | 'stimulus';
 
 export interface PartPin {
   /** Pin name, which becomes the terminal id suffix. */
@@ -114,6 +124,14 @@ export interface PartDefinition {
    * device. Returning pairs rather than mutating a netlist keeps this declarative.
    */
   readonly internalSpec?: BreadboardSpec;
+  /**
+   * Quantities the world supplies to this part, when it has any.
+   *
+   * Carried on the definition rather than looked up from the manifest because both the inspector
+   * and the environment need them, and neither should have to hold a second registry of manifests
+   * in step with this one.
+   */
+  readonly state?: readonly StateVariable[];
   /**
    * Properties that change how the part is *displayed* and not what it does electrically.
    *
@@ -314,6 +332,7 @@ const DEFINITIONS: readonly PartDefinition[] = [
   LED,
   PUSHBUTTON,
   ...INSTRUMENTS,
+  ...STIMULI,
 ];
 
 const BY_TYPE = new Map(DEFINITIONS.map((d) => [d.type, d]));

@@ -419,7 +419,15 @@ export class Diode implements Device {
 }
 
 /** Visible-spectrum LED colours, with datasheet-typical forward voltages. */
-export type LedColor = 'red' | 'yellow' | 'green' | 'blue' | 'white';
+export type LedColor =
+  | 'infrared'
+  | 'red'
+  | 'orange'
+  | 'yellow'
+  | 'green'
+  | 'blue'
+  | 'white'
+  | 'uv';
 
 /**
  * Forward voltage at 20 mA, the number printed on every LED datasheet.
@@ -428,11 +436,17 @@ export type LedColor = 'red' | 'yellow' | 'green' | 'blue' | 'white';
  * in simulation reads 2.0 V because a real red LED does, not because a constant was fitted.
  */
 const LED_VF_AT_20MA: Record<LedColor, number> = {
+  // Ordered by wavelength, which is also the order the forward voltage runs in -- a fact of the
+  // band gap rather than a coincidence, and the reason an infrared LED will light from a single
+  // cell and a UV one will not.
+  infrared: 1.4,
   red: 2.0,
+  orange: 2.0,
   yellow: 2.1,
   green: 3.2,
   blue: 3.3,
   white: 3.3,
+  uv: 3.4,
 };
 
 /** LEDs have soft knees; N in this range matches measured curves far better than N=1. */

@@ -28,6 +28,7 @@ import type {
   ManifestPin,
   StateVariable,
 } from './manifest.js';
+import type { DeviceReadout } from '@robo-journey/sim-core';
 import type { PartDefinition, PartPin } from './registry.js';
 
 /** Logic thresholds default to fractions of the supply when a datasheet gives none. */
@@ -124,6 +125,58 @@ export class ManifestDevice implements Device {
 
     const behavior = this.manifest.behavior;
     this.actualPosition = behavior.kind === 'pwm-actuator' ? behavior.minPosition : 0;
+  }
+
+  /**
+   * What the part is currently sensing or doing.
+   *
+   * Every state variable, plus whatever the behaviour has to say. This is what makes the
+   * interaction toolkit legible: drag a flame closer and the sensor's own readout climbs, which
+   * answers "is it responding" without having to wire an LED to it to find out.
+   */
+  readout(): DeviceReadout[] {
+    const rows: DeviceReadout[] = [];
+
+    for (const variable of this.manifest.state) {
+      const value = this.state.get(variable.name);
+      const digits = Math.abs(value) >= 100 ? 0 : Math.abs(value) >= 1 ? 2 : 3;
+      rows.push({
+        label: variable.label,
+        value: variable.unit ? `${value.toFixed(digits)} ${variable.unit}` : value.toFixed(digits),
+      });
+    }
+
+    const behavior = this.manifest.behavior;
+    if (behavior.kind === 'pwm-actuator') {
+      rows.push({
+        label: 'Position',
+        value: this.commandedPosition === null ? 'no signal' : `${this.actualPosition.toFixed(0)} deg`,
+      });
+    }
+    if (behavior.kind === 'threshold-switch') {
+      const level = this.driven.get(behavior.outputPin);
+      rows.push({ label: 'Output', value: level === undefined ? 'idle' : level ? 'HIGH' : 'LOW' });
+    }
+
+    return rows;
+  }
+
+  /**
+   * Set one of the part's state variables live.
+   *
+   * This is how the world reaches a sensor: the environment works out what a flame at some
+   * distance amounts to and writes it here. Going through the device rather than through a
+   * property change matters, because a property change rebuilds the circuit -- and rebuilding
+   * sixty times a second while someone drags a flame across the workspace would restart the
+   * sketch on every frame.
+   */
+  setState(name: string, value: number): void {
+    this.state.set(name, value);
+  }
+
+  /** Read one back, for the UI's own display. */
+  getState(name: string): number {
+    return this.state.get(name);
   }
 
   /** Position of a `pwm-actuator`, in the part's own units. Null before any pulse arrives. */
@@ -447,6 +500,7 @@ export function manifestToPartDefinition(
     label: manifest.name,
     category: mapCategory(manifest.category),
     provenance: manifest.provenance.source,
+    state: manifest.state,
     width: layout.width,
     height: layout.height,
     pins,

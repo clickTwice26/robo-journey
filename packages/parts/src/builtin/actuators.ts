@@ -69,12 +69,20 @@ export const BUZZER_ACTIVE: ComponentManifest = {
     ],
     7,
   ),
-  state: [],
+  state: [
+    // Not a quantity the world supplies -- nothing on the canvas makes a buzzer louder -- so these
+    // carry no `quantity` and stay under the user's control. What they do drive is the sound this
+    // buzzer *emits*, which a microphone module across the bench will hear.
+    { name: 'volumeDb', label: 'Loudness', unit: 'dB', min: 40, max: 100, default: 85, step: 1 },
+    { name: 'frequencyHz', label: 'Tone', unit: 'Hz', min: 1000, max: 4000, default: 2300, step: 50 },
+  ],
   behavior: { kind: 'passive' },
   limits: { vccMaxVolts: 5.5, pinMaxAmps: 0.09 },
   provenance: builtin([
-    'No sound is produced. Electrically it is a 60 ohm load, which is the part the circuit cares ' +
-      'about; the tone is fixed by the buzzer\'s own oscillator and cannot be changed anyway.',
+    'Nothing is played through your speakers. The buzzer emits into the simulated workspace, so a ' +
+      'sound sensor nearby will hear it; there is no audio.',
+    'The tone is adjustable here. On a real active buzzer it is fixed by the internal oscillator ' +
+      'and about 2.3 kHz, whatever you would like it to be.',
   ]),
 };
 
@@ -94,15 +102,21 @@ export const BUZZER_PASSIVE: ComponentManifest = {
     ],
     7,
   ),
-  state: [],
+  state: [
+    { name: 'volumeDb', label: 'Loudness', unit: 'dB', min: 40, max: 95, default: 75, step: 1 },
+  ],
   // A piezo element genuinely is a capacitor -- around 20 nF -- and modelling it as one is not an
   // approximation. It is also why a passive buzzer draws current only on the edges, and why it is
   // safe on a pin where the active one is not.
   behavior: { kind: 'capacitor', pinA: '+', pinB: '-', farads: 20e-9, polarised: false },
   limits: { vccMaxVolts: 12, pinMaxAmps: 0.02 },
   provenance: builtin([
-    'No sound is produced. The 20 nF capacitance is the electrical behaviour and it is simulated; ' +
-      'the mechanical resonance that decides how loud a given frequency is, is not.',
+    'Nothing is played through your speakers. It emits into the simulated workspace so a sound ' +
+      'sensor can hear it; there is no audio.',
+    'There is no tone property because there is no tone to set: the pitch is whatever the sketch ' +
+      'drives the pin at, which is the entire difference between this and the active one.',
+    'The mechanical resonance that decides how loud a given frequency comes out is not modelled, ' +
+      'so loudness is the figure you set rather than one that peaks near 2 kHz as a real disc does.',
   ]),
 };
 

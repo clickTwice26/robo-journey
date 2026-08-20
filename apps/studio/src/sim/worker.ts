@@ -20,8 +20,11 @@ import {
   type Fault,
 } from '@robo-journey/sim-core';
 import {
+  ManifestDevice,
   buildCircuit,
+  fieldAt,
   installBuiltinManifests,
+  isDriven,
   manifestToPartDefinition,
   parseProbeChannel,
   partDefinition,
@@ -30,6 +33,7 @@ import {
   splitTerminal,
   type BuiltCircuit,
   type ComponentManifest,
+  type EnvironmentSource,
   type Project,
 } from '@robo-journey/parts';
 
@@ -55,6 +59,21 @@ import {
  * output, whereas `0x24 = 0x20` makes you go and look it up. Addresses and bit names are from the
  * ATmega328P datasheet.
  */
+/**
+ * Parts that make a noise when driven, and the terminals that decide whether they are.
+ *
+ * A short table rather than a manifest field, because emitting into the world is a property of a
+ * handful of parts and inventing schema for it would be a lot of ceremony for two buzzers.
+ */
+const SOUND_EMITTERS: Record<string, { plus: string; minus: string; defaultDb: number }> = {
+  'buzzer-active': { plus: '+', minus: '-', defaultDb: 85 },
+  'buzzer-passive': { plus: '+', minus: '-', defaultDb: 75 },
+};
+
+/** Hold a value inside a state variable's declared range, as the real quantity would be. */
+const clamp = (value: number, min: number, max: number): number =>
+  Math.min(max, Math.max(min, value));
+
 const WATCHED_REGISTERS: { name: string; address: number; bits: string[] }[] = [
   { name: 'PINB', address: 0x23, bits: ['PINB7', 'PINB6', 'PINB5', 'PINB4', 'PINB3', 'PINB2', 'PINB1', 'PINB0'] },
   { name: 'DDRB', address: 0x24, bits: ['DDB7', 'DDB6', 'DDB5', 'DDB4', 'DDB3', 'DDB2', 'DDB1', 'DDB0'] },
@@ -199,6 +218,107 @@ class Simulation implements SimApi {
     if (this.built && cycles > 0) this.built.board.runFor(0);
   }
 
+  /**
+   * Replace the stimuli on the workspace and push them straight into the sensors.
+   *
+   * Applied immediately rather than on the next tick so a paused simulation still responds while
+   * someone drags a flame around -- watching a sensor react with the sketch stopped is a perfectly
+   * reasonable way to check the wiring.
+   */
+  setEnvironment(sources: readonly EnvironmentSource[]): void {
+    this.environment = [...sources];
+    this.applyEnvironment();
+  }
+
+  /**
+   * Work out what each sensor is exposed to and tell it.
+   *
+   * A part's state variable is only taken over when a source of that quantity is actually on the
+   * workspace. With none placed, the part keeps whatever its own control says -- which is what
+   * makes this additive rather than a replacement for the sliders.
+   */
+  private applyEnvironment(): void {
+    this.driven = {};
+    if (!this.built || !this.project) return;
+
+    // Emitters in the circuit itself. A buzzer being driven is a sound source at its own position,
+    // which is what lets a sound sensor across the bench hear it -- the loop from a pin, through
+    // the buzzer, across the workspace and back in through another pin closes entirely inside the
+    // simulation, and nothing about it is special-cased into either part.
+    const sources = [...this.environment, ...this.circuitEmissions()];
+
+    for (const part of this.project.parts) {
+      const device = this.built.devices.get(part.id);
+      if (!(device instanceof ManifestDevice)) continue;
+
+      let definition;
+      try {
+        definition = partDefinition(part.type);
+      } catch {
+        continue;
+      }
+
+      for (const variable of definition.state ?? []) {
+        if (!variable.quantity) continue;
+        if (!isDriven(sources, variable.quantity)) continue;
+
+        // The part's own control is the ambient level the sources add to, so a photoresistor in a
+        // lit room still reads the room when a lamp is switched on nearby.
+        const ambient =
+          typeof part.props[variable.name] === 'number'
+            ? (part.props[variable.name] as number)
+            : variable.default;
+
+        const value = clamp(
+          fieldAt(sources, variable.quantity, part.x, part.y, ambient),
+          variable.min,
+          variable.max,
+        );
+        device.setState(variable.name, value);
+        (this.driven[part.id] ??= {})[variable.name] = value;
+      }
+    }
+  }
+
+  /**
+   * Sound coming out of the circuit rather than out of the toolkit.
+   *
+   * Only while the thing is actually being driven, read off the voltage across its own terminals
+   * -- a buzzer wired up and never written to is silent, as it should be.
+   */
+  private circuitEmissions(): EnvironmentSource[] {
+    if (!this.built || !this.project) return [];
+    const out: EnvironmentSource[] = [];
+
+    for (const part of this.project.parts) {
+      const emitter = SOUND_EMITTERS[part.type];
+      if (!emitter) continue;
+
+      const plus = this.built.nodes.get(`${part.id}:${emitter.plus}`);
+      const minus = this.built.nodes.get(`${part.id}:${emitter.minus}`);
+      if (plus === undefined || minus === undefined) continue;
+
+      const across = Math.abs(
+        this.built.board.circuit.voltage(plus) - this.built.board.circuit.voltage(minus),
+      );
+      if (across < 1) continue;
+
+      const volume = Number(part.props.volumeDb ?? emitter.defaultDb);
+      out.push({
+        id: `${part.id}:emitted-sound`,
+        quantity: 'sound',
+        x: part.x,
+        y: part.y,
+        // Under-driven is quieter, which is true and is why a buzzer on 3.3 V sounds feeble.
+        intensity: volume - (1 - Math.min(1, across / 5)) * 12,
+        reachMm: 60,
+        active: true,
+      });
+    }
+
+    return out;
+  }
+
   private isDisplayProp(partType: string, key: string): boolean {
     try {
       return partDefinition(partType).displayProps?.includes(key) ?? false;
@@ -238,6 +358,7 @@ class Simulation implements SimApi {
     return {
       scopes: this.scopeFrames(),
       running: this.running,
+      driven: this.driven,
       time: board.time,
       cycles: board.mcu.cycles,
       realtimeRatio: this.realtimeRatio,
@@ -433,6 +554,13 @@ class Simulation implements SimApi {
    */
   private readonly blownFuses = new Set<string>();
 
+  /** Stimuli currently on the workspace. Not part of the project the circuit is built from. */
+  private environment: EnvironmentSource[] = [];
+  /** Whether the circuit itself contains anything that radiates, so the tick can skip the check. */
+  private hasCircuitEmitters = false;
+  /** What the environment last supplied, for the snapshot. */
+  private driven: Record<string, Record<string, number>> = {};
+
   private withBlownFuses(project: Project): Project {
     if (this.blownFuses.size === 0) return project;
     return {
@@ -466,6 +594,12 @@ class Simulation implements SimApi {
     // -- losing them every time a wire moves would make the debugger useless while wiring.
     for (const address of previousBreakpoints) this.built.board.setBreakpoint(address);
 
+    this.hasCircuitEmitters = this.project.parts.some((p) => p.type in SOUND_EMITTERS);
+
+    // A rebuild makes fresh devices, which start at their defaults. Without this, moving a wire
+    // would put every sensor back to its power-on state while the flame was still burning.
+    this.applyEnvironment();
+
     this.detachSerial = this.built.board.mcu.onSerialByte((byte) => {
       // Cap the buffer: a sketch printing in a tight loop must not grow this without bound
       // between polls.
@@ -489,6 +623,12 @@ class Simulation implements SimApi {
     const requested = Math.min(elapsed, MAX_CHUNK_SECONDS);
     const started = performance.now();
     try {
+      // Refresh the world before advancing, because part of it comes from the circuit: a buzzer
+      // that was silent last tick may be sounding now, and the sensor listening for it has to be
+      // told before the sketch gets to read the pin. Skipped entirely when nothing is emitting,
+      // so the ordinary circuit pays nothing for this.
+      if (this.environment.length > 0 || this.hasCircuitEmitters) this.applyEnvironment();
+
       this.built.board.runFor(requested);
     } catch (error) {
       // A circuit that cannot be solved must not take the worker down: stop, and let the snapshot

@@ -261,12 +261,18 @@ export function UnoShape({ part, selected, showLabels = false }: ShapeProps & { 
 
 // ---------------------------------------------------------------------------------------------
 
-const LED_COLORS: Record<string, { body: string; glow: string }> = {
+const LED_COLORS: Record<string, { body: string; glow: string; visible?: boolean }> = {
+  // `visible: false` is not a rendering shortcut: an infrared LED conducting at 20 mA emits
+  // nothing a person can see, and drawing it glowing would be the simulator telling a lie about
+  // the one thing you would use it to find out.
+  infrared: { body: '#3a2a2a', glow: '#5a3a3a', visible: false },
   red: { body: '#c0392b', glow: '#ff6b5a' },
+  orange: { body: '#c26618', glow: '#ffa94d' },
   yellow: { body: '#c8a71f', glow: '#ffe066' },
   green: { body: '#2f9e44', glow: '#69db7c' },
   blue: { body: '#1c60c4', glow: '#74c0fc' },
   white: { body: '#c9ccd1', glow: '#ffffff' },
+  uv: { body: '#5b3ea8', glow: '#b197fc', visible: false },
 };
 
 export function LedShape({
@@ -276,13 +282,15 @@ export function LedShape({
 }: ShapeProps & { brightness?: number }) {
   const color = LED_COLORS[String(part.props.color ?? 'red')] ?? LED_COLORS.red!;
   const radius = mm(2.5);
+  // An invisible emitter still passes current and still gets hot; it simply does not light up.
+  const lit = brightness > 0.02 && color.visible !== false;
 
   return (
     <Group>
       {/* Legs: anode long, cathode short, one pitch apart -- as on the real part. */}
       <Line points={[0, 0, 0, mm(3)]} stroke={canvas.pinBrass} strokeWidth={1.5} />
       <Line points={[mm(PITCH_MM), 0, mm(PITCH_MM), mm(2)]} stroke={canvas.pinBrass} strokeWidth={1.5} />
-      {brightness > 0.02 && (
+      {lit && (
         <Circle
           x={mm(PITCH_MM / 2)}
           y={mm(-2)}
@@ -296,8 +304,8 @@ export function LedShape({
         x={mm(PITCH_MM / 2)}
         y={mm(-2)}
         radius={radius}
-        fill={brightness > 0.02 ? color.glow : color.body}
-        opacity={brightness > 0.02 ? 0.55 + brightness * 0.45 : 0.85}
+        fill={lit ? color.glow : color.body}
+        opacity={lit ? 0.55 + brightness * 0.45 : 0.85}
         stroke={selected ? canvas.selection : '#00000055'}
         strokeWidth={selected ? 2 : 0.5}
       />

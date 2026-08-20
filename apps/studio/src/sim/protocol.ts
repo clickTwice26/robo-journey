@@ -6,7 +6,7 @@
  * the solver, which is what lets the engine run flat out without the renderer stalling it.
  */
 import type { ChannelSpec, DeviceReadout, DisasmLine, Fault } from '@robo-journey/sim-core';
-import type { ComponentManifest, Project } from '@robo-journey/parts';
+import type { ComponentManifest, EnvironmentSource, Project } from '@robo-journey/parts';
 
 export interface SimSnapshot {
   readonly running: boolean;
@@ -30,6 +30,13 @@ export interface SimSnapshot {
    * nothing to the frame.
    */
   readonly readouts: Record<string, readonly DeviceReadout[]>;
+  /**
+   * State variables the world is currently driving, by part id then variable name.
+   *
+   * Only the ones a placed stimulus is supplying: with nothing on the workspace this is empty and
+   * the sliders are in charge, which is what the UI uses to say which is which.
+   */
+  readonly driven: Record<string, Record<string, number>>;
   /**
    * What each oscilloscope on the canvas is showing, by part id.
    *
@@ -83,6 +90,7 @@ export const EMPTY_SNAPSHOT: SimSnapshot = {
   voltages: {},
   brightness: {},
   readouts: {},
+  driven: {},
   scopes: {},
   faults: [],
   serial: '',
@@ -155,6 +163,15 @@ export interface SimApi {
   reset(): void;
   /** Set a part property live, e.g. pressing a button. */
   setPartProp(partId: string, key: string, value: unknown): void;
+  /**
+   * Replace the stimuli placed on the workspace.
+   *
+   * Separate from `loadProject` because dragging a flame around must not rebuild the circuit. A
+   * rebuild resets the MCU, and restarting the sketch on every frame of a drag would make the
+   * interaction useless -- the sensor would respond and the program watching it would never get
+   * past `setup`.
+   */
+  setEnvironment(sources: readonly EnvironmentSource[]): void;
   /** Read the latest snapshot. Consumes buffered serial output. */
   snapshot(): SimSnapshot;
 

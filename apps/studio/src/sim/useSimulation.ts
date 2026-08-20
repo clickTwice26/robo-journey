@@ -9,6 +9,7 @@
 import * as Comlink from 'comlink';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { ChannelSpec, DisasmLine } from '@robo-journey/sim-core';
+import { environmentSources, isStimulus } from '@robo-journey/parts';
 import type { ComponentManifest, Project } from '@robo-journey/parts';
 import { useStudio } from '../store.ts';
 import type { DecodedFrame, McuState, SimApi, TraceData } from './protocol.ts';
@@ -22,9 +23,23 @@ import type { DecodedFrame, McuState, SimApi, TraceData } from './protocol.ts';
  */
 function circuitFingerprint(project: Project): string {
   return JSON.stringify([
-    project.parts.map((p) => [p.id, p.type, p.x, p.y, p.rotation, p.props]),
+    project.parts
+      // Stimuli are not in the circuit -- no pins, no devices -- so moving a flame must not
+      // rebuild it. A rebuild resets the MCU, and dragging one across the workspace would restart
+      // the sketch on every frame, which is exactly the interaction this is meant to enable.
+      .filter((p) => !isStimulus(p.type))
+      .map((p) => [p.id, p.type, p.x, p.y, p.rotation, p.props]),
     project.wires.map((w) => [w.id, w.from, w.to]),
   ]);
+}
+
+/** Everything about the project that changes what the sensors are exposed to. */
+function environmentFingerprint(project: Project): string {
+  return JSON.stringify(
+    project.parts
+      .filter((p) => isStimulus(p.type))
+      .map((p) => [p.id, p.type, p.x, p.y, p.props]),
+  );
 }
 
 export interface SimulationController {
@@ -60,6 +75,8 @@ export function useSimulation(): SimulationController {
   const project = useStudio((s) => s.project);
   const fingerprint = circuitFingerprint(project);
   const lastFingerprint = useRef<string | null>(null);
+  const envFingerprint = environmentFingerprint(project);
+  const lastEnvironment = useRef<string | null>(null);
 
   useEffect(() => {
     const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
@@ -105,6 +122,18 @@ export function useSimulation(): SimulationController {
     lastFingerprint.current = fingerprint;
     void apiRef.current?.loadProject(project);
   }, [fingerprint, project]);
+
+  /**
+   * Keep the world in step with the canvas, without touching the circuit.
+   *
+   * Its own effect and its own fingerprint precisely so that moving a stimulus is cheap: the
+   * sensors get new values and the sketch keeps running.
+   */
+  useEffect(() => {
+    if (lastEnvironment.current === envFingerprint) return;
+    lastEnvironment.current = envFingerprint;
+    void apiRef.current?.setEnvironment(environmentSources(project));
+  }, [envFingerprint, project]);
 
   const call = useCallback(<K extends keyof SimApi>(method: K, ...args: Parameters<SimApi[K]>) => {
     const api = apiRef.current;

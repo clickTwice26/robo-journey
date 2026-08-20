@@ -25,6 +25,8 @@ import {
   type Point,
 } from './geometry.ts';
 import { AmmeterShape, MultimeterShape, OscilloscopeShape } from './instruments.tsx';
+import { STIMULUS_SHAPES } from './stimulus.tsx';
+import { AnimatedPart, isAnimated } from './animated.tsx';
 import {
   BreadboardShape,
   ButtonShape,
@@ -346,7 +348,11 @@ export function Workspace({ width, height, onControls, onPartContextMenu }: Prop
             }
           })();
 
+          const StimulusShape = STIMULUS_SHAPES[part.type];
+
           const shape =
+            // The world, not the circuit: a lamp draws as a lamp, with no body and no pins.
+            StimulusShape ? <StimulusShape {...common} /> :
             definition?.internalSpec ? (
               <BreadboardShape {...common} spec={definition.internalSpec} />
             ) :
@@ -371,11 +377,23 @@ export function Workspace({ width, height, onControls, onPartContextMenu }: Prop
             // Falling through to null here is what made generated parts invisible, leaving only
             // their pin hit-targets on the canvas.
             definition ? (
-              <GenericPartShape
-                {...common}
-                definition={definition}
-                showLabels={view.scale >= LABEL_ZOOM_THRESHOLD}
-              />
+              // Parts that visibly do something wrap the ordinary artwork rather than replacing
+              // it, so a vibration motor is the same drawing, shaking.
+              isAnimated(part.type) ? (
+                <AnimatedPart part={part} definition={definition} snapshot={snapshot}>
+                  <GenericPartShape
+                    {...common}
+                    definition={definition}
+                    showLabels={view.scale >= LABEL_ZOOM_THRESHOLD}
+                  />
+                </AnimatedPart>
+              ) : (
+                <GenericPartShape
+                  {...common}
+                  definition={definition}
+                  showLabels={view.scale >= LABEL_ZOOM_THRESHOLD}
+                />
+              )
             ) : null;
 
           if (!shape) return null;
