@@ -39,8 +39,14 @@ import SkipNextIcon from '@mui/icons-material/SkipNext';
 import UndoIcon from '@mui/icons-material/Undo';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlineOutlined';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AccountCircleIcon from '@mui/icons-material/AccountCircle';
+import CloudDoneIcon from '@mui/icons-material/CloudDone';
+import CloudOffIcon from '@mui/icons-material/CloudOff';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import LogoutIcon from '@mui/icons-material/Logout';
 import { EXAMPLES, emptyProject } from '@robo-journey/parts';
 import { compileSketch, CompileUnavailableError } from './api.ts';
+import { createProject, logout as logoutRequest, saveProject } from './auth.ts';
 import { downloadProject, openProjectFile } from './projectFile.ts';
 import { useStudio } from './store.ts';
 import type { SimulationController } from './sim/useSimulation.ts';
@@ -74,9 +80,17 @@ interface Props {
   sim: SimulationController;
   actions: MenuBarActions | null;
   onOpenDatasheet(): void;
+  onOpenAccount(): void;
+  onOpenCloudProjects(): void;
 }
 
-export function MenuBar({ sim, actions, onOpenDatasheet }: Props) {
+export function MenuBar({
+  sim,
+  actions,
+  onOpenDatasheet,
+  onOpenAccount,
+  onOpenCloudProjects,
+}: Props) {
   const project = useStudio((s) => s.project);
   const snapshot = useStudio((s) => s.snapshot);
   const compileStatus = useStudio((s) => s.compileStatus);
@@ -84,6 +98,10 @@ export function MenuBar({ sim, actions, onOpenDatasheet }: Props) {
   const selection = useStudio((s) => s.selection);
   const past = useStudio((s) => s.past);
   const future = useStudio((s) => s.future);
+  const user = useStudio((s) => s.user);
+  const cloudProjectId = useStudio((s) => s.cloudProjectId);
+  const syncedAt = useStudio((s) => s.syncedAt);
+  const syncError = useStudio((s) => s.syncError);
 
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const anchors = useRef<Record<string, HTMLElement | null>>({});
@@ -145,6 +163,41 @@ export function MenuBar({ sim, actions, onOpenDatasheet }: Props) {
 
   const save = useCallback(() => downloadProject(useStudio.getState().project), []);
 
+  /**
+   * Save to the account.
+   *
+   * Creates a project the first time and updates it thereafter, so repeated saves do not litter
+   * the account with copies of the same circuit.
+   */
+  const saveToAccount = useCallback(async () => {
+    const store = useStudio.getState();
+    if (!store.user) {
+      onOpenAccount();
+      return;
+    }
+    try {
+      if (store.cloudProjectId) {
+        await saveProject(store.cloudProjectId, store.project.name, store.project);
+      } else {
+        const created = await createProject(store.project.name, store.project);
+        store.setCloudProject(created.id);
+      }
+      store.setSyncState(new Date(), null);
+    } catch (caught) {
+      store.setSyncState(store.syncedAt, (caught as Error).message);
+    }
+  }, [onOpenAccount]);
+
+  const signOut = useCallback(async () => {
+    try {
+      await logoutRequest();
+    } catch {
+      // Even if the request fails the local session should end; the cookie is cleared server-side
+      // on the next successful call, and leaving the UI signed in would be worse.
+    }
+    useStudio.getState().setUser(null);
+  }, []);
+
   const open = useCallback(async () => {
     try {
       const loaded = await openProjectFile();
@@ -194,7 +247,9 @@ export function MenuBar({ sim, actions, onOpenDatasheet }: Props) {
       switch (event.key.toLowerCase()) {
         case 's':
           event.preventDefault();
-          save();
+          // Shift saves to the account; plain Save downloads a file, as every editor does.
+          if (event.shiftKey) void saveToAccount();
+          else save();
           break;
         case 'o':
           event.preventDefault();
@@ -221,7 +276,7 @@ export function MenuBar({ sim, actions, onOpenDatasheet }: Props) {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [save, open, build, buildAndRun]);
+  }, [save, open, build, buildAndRun, saveToAccount]);
 
   // --- Menu definitions ----------------------------------------------------------------------------
 
@@ -300,6 +355,41 @@ export function MenuBar({ sim, actions, onOpenDatasheet }: Props) {
         ],
       },
       {
+        id: 'account',
+        label: user ? user.displayName : 'Account',
+        items: user
+          ? [
+              {
+                label: user.email,
+                secondary: `Signed in since ${new Date(user.createdAt).toLocaleDateString()}`,
+                icon: <AccountCircleIcon fontSize="small" />,
+                onClick: close,
+              },
+              { divider: true },
+              {
+                label: 'Your projects…',
+                icon: <CloudDoneIcon fontSize="small" />,
+                onClick: onOpenCloudProjects,
+              },
+              {
+                label: cloudProjectId ? 'Save to account' : 'Save to account as new',
+                icon: <CloudUploadIcon fontSize="small" />,
+                hint: `${MOD}⇧S`,
+                onClick: () => void saveToAccount(),
+              },
+              { divider: true },
+              { label: 'Sign out', icon: <LogoutIcon fontSize="small" />, onClick: () => void signOut() },
+            ]
+          : [
+              {
+                label: 'Sign in or create an account',
+                icon: <AccountCircleIcon fontSize="small" />,
+                secondary: 'Syncs your circuits across machines. Everything works without one.',
+                onClick: onOpenAccount,
+              },
+            ],
+      },
+      {
         id: 'help',
         label: 'Help',
         items: [
@@ -317,8 +407,9 @@ export function MenuBar({ sim, actions, onOpenDatasheet }: Props) {
       },
     ],
     [
-      actions, build, buildAndRun, close, future.length, hex, loadExample, newProject, onOpenDatasheet,
-      open, past.length, save, selection, sim, snapshot.running, unplugSelection,
+      actions, build, buildAndRun, cloudProjectId, close, future.length, hex, loadExample,
+      newProject, onOpenAccount, onOpenCloudProjects, onOpenDatasheet, open, past.length, save,
+      saveToAccount, selection, signOut, sim, snapshot.running, unplugSelection, user,
     ],
   );
 
@@ -412,7 +503,13 @@ export function MenuBar({ sim, actions, onOpenDatasheet }: Props) {
 
         <Box sx={{ flex: 1 }} />
 
-        <Typography variant="caption" color="text.secondary" noWrap sx={{ maxWidth: 260 }}>
+        <SyncStatus
+          user={user}
+          syncedAt={syncedAt}
+          syncError={syncError}
+          cloudProjectId={cloudProjectId}
+        />
+        <Typography variant="caption" color="text.secondary" noWrap sx={{ maxWidth: 220, ml: 1 }}>
           {project.name}
         </Typography>
       </Toolbar>
@@ -488,6 +585,57 @@ export function MenuBar({ sim, actions, onOpenDatasheet }: Props) {
         {error && <Chip size="small" color="error" label={error} onDelete={() => setError(null)} />}
       </Toolbar>
     </AppBar>
+  );
+}
+
+/**
+ * Where the document currently lives.
+ *
+ * Worth its own indicator because the answer changes what a refresh costs. Signed out, work is in
+ * this browser only -- true and fine, but the user should know it rather than assume a cloud that
+ * is not there.
+ */
+function SyncStatus({
+  user,
+  syncedAt,
+  syncError,
+  cloudProjectId,
+}: {
+  user: { displayName: string } | null | undefined;
+  syncedAt: Date | null;
+  syncError: string | null;
+  cloudProjectId: string | null;
+}) {
+  if (user === undefined) return null;
+
+  if (syncError) {
+    return (
+      <Tooltip title={syncError}>
+        <Chip size="small" color="warning" icon={<CloudOffIcon />} label="not synced" variant="outlined" />
+      </Tooltip>
+    );
+  }
+
+  if (!user) {
+    return (
+      <Tooltip title="Saved in this browser. Sign in to sync across machines.">
+        <Chip size="small" variant="outlined" icon={<CloudOffIcon />} label="local only" />
+      </Tooltip>
+    );
+  }
+
+  if (!cloudProjectId) {
+    return (
+      <Tooltip title="Signed in, but this circuit is not saved to your account yet.">
+        <Chip size="small" variant="outlined" icon={<CloudOffIcon />} label="not in account" />
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Tooltip title={syncedAt ? `Last synced ${syncedAt.toLocaleTimeString()}` : 'Saved to your account'}>
+      <Chip size="small" variant="outlined" color="success" icon={<CloudDoneIcon />} label="synced" />
+    </Tooltip>
   );
 }
 

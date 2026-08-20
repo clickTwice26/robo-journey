@@ -33,6 +33,7 @@ than from the peripheral that sent them.
 - [x] **M2** Konva workspace, breadboard wiring, Monaco editor, serial monitor
 - [x] **M3** Oscilloscope, logic analyser with serial decode, register inspector, disassembler, breakpoints
 - [x] **M4** Data-driven component manifests, and datasheet extraction with Gemini
+- [x] Transistors, I²C, accounts and persistence
 - [ ] **M5** Tauri desktop shell, teaching hooks
 - [ ] **M5** Tauri desktop shell, teaching hooks
 
@@ -182,6 +183,30 @@ holds the key. A key in a frontend bundle is a published key.
 cp .env.example .env    # then add your GEMINI_API_KEY
 npm run test:live       # runs the extraction tests; skips itself without a key
 ```
+
+## Persistence
+
+Two layers, and the first matters most because it needs no account.
+
+**Local autosave.** The open circuit is written to `localStorage`, debounced, flushed when the tab
+hides, and restored at store creation rather than in an effect — so the first render already has
+your work, with no flash of an empty canvas and no window in which an autosave could fire against
+the default document and overwrite the real one. A stored project that no longer validates is
+discarded rather than repaired: silently loading half a document is worse than starting fresh,
+because you would not know which half.
+
+**Accounts**, for syncing across machines. SQLite through `node:sqlite` — ships with Node, no
+native build step, and the whole database is one file you can back up or delete. Passwords are
+hashed with scrypt at N=2^15 (~55 ms), salted per user, with the cost parameters stored alongside
+so they can be raised later without forcing a password reset. Session tokens are 32 random bytes
+stored only as a SHA-256 hash, so a leaked database does not hand over live sessions. Cookies are
+`httpOnly` and `SameSite=Strict`.
+
+A wrong password and a missing account return the same message, and a missing account still pays
+the cost of a hash — so neither the response nor its timing reveals which addresses are registered.
+Login is rate-limited per address and per account, because those are different attacks.
+
+The app never gates on sign-in. Everything works signed out; an account only adds sync.
 
 ## Performance
 

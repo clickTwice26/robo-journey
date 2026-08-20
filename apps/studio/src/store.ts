@@ -10,6 +10,7 @@ import { create } from 'zustand';
 import { emptyProject, type PartInstance, type Project, type Wire } from '@robo-journey/parts';
 import { EMPTY_SNAPSHOT, type SimSnapshot } from './sim/protocol.ts';
 import { restoreWorkspace } from './persistence.ts';
+import type { User } from './auth.ts';
 
 export type CompileStatus = 'idle' | 'compiling' | 'ok' | 'error';
 
@@ -44,6 +45,14 @@ interface StudioState {
   selection: string | null;
   mode: CanvasMode;
 
+  /** Signed-in user, or null. Undefined until the first check completes. */
+  user: User | null | undefined;
+  /** Id of the account-stored project this document came from, if any. */
+  cloudProjectId: string | null;
+  /** Last time it synced to the account, for the status line. */
+  syncedAt: Date | null;
+  syncError: string | null;
+
   compileStatus: CompileStatus;
   diagnostics: Diagnostic[];
   hex: string | null;
@@ -75,6 +84,9 @@ interface StudioState {
   removeWire(id: string): void;
 
   setSketch(name: string, contents: string): void;
+  setUser(user: User | null): void;
+  setCloudProject(id: string | null): void;
+  setSyncState(syncedAt: Date | null, syncError: string | null): void;
   setSnapshot(snapshot: SimSnapshot): void;
   setSelection(id: string | null): void;
   setMode(mode: CanvasMode): void;
@@ -119,6 +131,11 @@ export const useStudio = create<StudioState>((set, get) => ({
   selection: null,
   mode: { kind: 'select' },
 
+  user: undefined,
+  cloudProjectId: null,
+  syncedAt: null,
+  syncError: null,
+
   compileStatus: 'idle',
   diagnostics: [],
   hex: null,
@@ -126,7 +143,8 @@ export const useStudio = create<StudioState>((set, get) => ({
 
   setProject: (project) => set((state) => withHistory(state, () => project)),
 
-  loadProject: (project) => set({ project, past: [], future: [] }),
+  // A freshly opened document has no history and is not yet tied to an account project.
+  loadProject: (project) => set({ project, past: [], future: [], cloudProjectId: null, syncedAt: null }),
 
   undo: () =>
     set((state) => {
@@ -225,6 +243,18 @@ export const useStudio = create<StudioState>((set, get) => ({
           : [...state.project.sketch, { name, contents }],
       },
     })),
+
+  setUser: (user) =>
+    set((state) => ({
+      user,
+      // Signing out must not leave the document pointing at an account project it can no longer
+      // reach, or the next save would fail silently.
+      cloudProjectId: user ? state.cloudProjectId : null,
+      syncedAt: user ? state.syncedAt : null,
+      syncError: null,
+    })),
+  setCloudProject: (cloudProjectId) => set({ cloudProjectId, syncError: null }),
+  setSyncState: (syncedAt, syncError) => set({ syncedAt, syncError }),
 
   setSnapshot: (snapshot) => set({ snapshot }),
   setSelection: (selection) => set({ selection }),

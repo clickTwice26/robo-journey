@@ -28,6 +28,9 @@ import { ScopePanel } from './panels/Scope.tsx';
 import { InspectorPanel } from './panels/Inspector.tsx';
 import { DisassemblyPanel } from './panels/Disassembly.tsx';
 import { DatasheetDialog } from './panels/DatasheetDialog.tsx';
+import { AccountDialog } from './panels/AccountDialog.tsx';
+import { CloudProjectsDialog } from './panels/CloudProjectsDialog.tsx';
+import { fetchCurrentUser } from './auth.ts';
 import { AUTOSAVE_DELAY_MS, saveWorkspace } from './persistence.ts';
 import { useStudio } from './store.ts';
 
@@ -38,6 +41,8 @@ export function App() {
   const sim = useSimulation();
   const apiRef = useRef<DockviewApi | null>(null);
   const [datasheetOpen, setDatasheetOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [cloudOpen, setCloudOpen] = useState(false);
   /**
    * Bumped whenever the dockview layout changes.
    *
@@ -46,6 +51,27 @@ export function App() {
    * reporting every panel as closed forever.
    */
   const [revision, forceRender] = useState(0);
+
+  /**
+   * Restore the session, if there is one.
+   *
+   * A failure here is expected and harmless: the account service may simply not be running, and
+   * the app works fully without it. Treating that as an error would put a scary banner in front of
+   * someone whose circuit is perfectly fine.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void fetchCurrentUser()
+      .then((user) => {
+        if (!cancelled) useStudio.getState().setUser(user);
+      })
+      .catch(() => {
+        if (!cancelled) useStudio.getState().setUser(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /**
    * Autosave.
@@ -201,7 +227,13 @@ export function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-        <MenuBar sim={sim} actions={menuActions} onOpenDatasheet={() => setDatasheetOpen(true)} />
+        <MenuBar
+          sim={sim}
+          actions={menuActions}
+          onOpenDatasheet={() => setDatasheetOpen(true)}
+          onOpenAccount={() => setAccountOpen(true)}
+          onOpenCloudProjects={() => setCloudOpen(true)}
+        />
         <Box sx={{ flex: 1, minHeight: 0 }}>
           <DockviewReact components={components} onReady={onReady} className="dockview-theme-abyss" />
         </Box>
@@ -213,6 +245,14 @@ export function App() {
         onClose={() => setDatasheetOpen(false)}
         onAdded={() => forceRender((n) => n + 1)}
       />
+
+      <AccountDialog
+        open={accountOpen}
+        onClose={() => setAccountOpen(false)}
+        onSignedIn={(user) => useStudio.getState().setUser(user)}
+      />
+
+      <CloudProjectsDialog open={cloudOpen} onClose={() => setCloudOpen(false)} />
     </ThemeProvider>
   );
 }
