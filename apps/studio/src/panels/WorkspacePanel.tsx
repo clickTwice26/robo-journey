@@ -49,7 +49,13 @@ export function WorkspacePanel() {
 
   const handleControls = useCallback((controls: CanvasControls) => {
     controlsRef.current = controls;
+    // Published so the View menu can zoom too. Cleared on unmount, which is what lets those menu
+    // items disable themselves when the workspace panel is closed rather than silently doing
+    // nothing.
+    useStudio.getState().setCanvasControls(controls);
   }, []);
+
+  useEffect(() => () => useStudio.getState().setCanvasControls(null), []);
 
   const handleContextMenu = useCallback(
     (event: { partId: string; x: number; y: number }) => setMenu(event),

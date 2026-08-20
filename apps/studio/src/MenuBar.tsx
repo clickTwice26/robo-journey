@@ -25,6 +25,9 @@ import {
   Typography,
 } from '@mui/material';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import ZoomInIcon from '@mui/icons-material/ZoomIn';
+import ZoomOutIcon from '@mui/icons-material/ZoomOut';
+import FitScreenIcon from '@mui/icons-material/FitScreen';
 import BuildIcon from '@mui/icons-material/Build';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
@@ -104,6 +107,7 @@ export function MenuBar({
   const past = useStudio((s) => s.past);
   const future = useStudio((s) => s.future);
   const user = useStudio((s) => s.user);
+  const canvasControls = useStudio((s) => s.canvasControls);
   const cloudProjectId = useStudio((s) => s.cloudProjectId);
   const syncedAt = useStudio((s) => s.syncedAt);
   const syncError = useStudio((s) => s.syncError);
@@ -261,6 +265,19 @@ export function MenuBar({
           event.preventDefault();
           void buildAndRun();
           break;
+        case '=':
+        case '+':
+          event.preventDefault();
+          useStudio.getState().canvasControls?.zoomIn();
+          break;
+        case '-':
+          event.preventDefault();
+          useStudio.getState().canvasControls?.zoomOut();
+          break;
+        case '0':
+          event.preventDefault();
+          useStudio.getState().canvasControls?.fit();
+          break;
         case 'z':
           if (inEditor) return;
           event.preventDefault();
@@ -328,13 +345,38 @@ export function MenuBar({
         id: 'view',
         label: 'View',
         items: [
+          // The canvas zoom lived only as three floating buttons over the workspace. Anyone
+          // looking for it in a menu -- which is where every other application keeps it -- found
+          // a list of panels and nothing else.
+          {
+            label: 'Zoom in',
+            icon: <ZoomInIcon fontSize="small" />,
+            hint: shortcut('='),
+            disabled: !canvasControls,
+            onClick: () => canvasControls?.zoomIn(),
+          },
+          {
+            label: 'Zoom out',
+            icon: <ZoomOutIcon fontSize="small" />,
+            hint: shortcut('-'),
+            disabled: !canvasControls,
+            onClick: () => canvasControls?.zoomOut(),
+          },
+          {
+            label: 'Fit circuit to view',
+            icon: <FitScreenIcon fontSize="small" />,
+            hint: shortcut('0'),
+            disabled: !canvasControls,
+            onClick: () => canvasControls?.fit(),
+          },
+          { divider: true },
           ...PANELS.map((panel) => ({
             label: panel.title,
             secondary: actions?.isPanelOpen(panel.id) ? 'open' : 'closed',
             onClick: () => actions?.showPanel(panel.id),
           })),
           { divider: true },
-          { label: 'Reset layout', onClick: () => actions?.resetLayout() },
+          { label: 'Reset layout', icon: <RestartAltIcon fontSize="small" />, onClick: () => actions?.resetLayout() },
         ],
       },
       {
@@ -404,7 +446,7 @@ export function MenuBar({
     ],
     [
       actions, build, buildAndRun, cloudProjectId, close, future.length, hex, loadExample,
-      newProject, onOpenCloudProjects, onOpenDatasheet, open, past.length, save,
+      canvasControls, newProject, onOpenCloudProjects, onOpenDatasheet, open, past.length, save,
       saveToAccount, selection, signOut, sim, snapshot.running, unplugSelection, user,
     ],
   );

@@ -11,6 +11,7 @@ import { emptyProject, type PartInstance, type Project, type Wire } from '@robo-
 import { EMPTY_SNAPSHOT, type SimSnapshot } from './sim/protocol.ts';
 import { restoreWorkspace } from './persistence.ts';
 import type { User } from './auth.ts';
+import type { CanvasControls } from './canvas/Workspace.tsx';
 
 export type CompileStatus = 'idle' | 'compiling' | 'ok' | 'error';
 
@@ -88,6 +89,16 @@ interface StudioState {
   setCloudProject(id: string | null): void;
   setSyncState(syncedAt: Date | null, syncError: string | null): void;
   setSnapshot(snapshot: SimSnapshot): void;
+  /**
+   * Zoom and fit, published by the canvas so the View menu can reach them.
+   *
+   * Functions rather than state, and deliberately so: the canvas owns its own pan and zoom, and
+   * lifting that into the store would mean every pointer move during a drag went through it. This
+   * is a handle to the canvas, not a copy of its state -- null while the workspace panel is closed,
+   * which is exactly when the menu items should be disabled.
+   */
+  canvasControls: CanvasControls | null;
+  setCanvasControls(controls: CanvasControls | null): void;
   setSelection(id: string | null): void;
   setMode(mode: CanvasMode): void;
   setCompile(status: CompileStatus, diagnostics: Diagnostic[], hex: string | null): void;
@@ -257,6 +268,8 @@ export const useStudio = create<StudioState>((set, get) => ({
   setSyncState: (syncedAt, syncError) => set({ syncedAt, syncError }),
 
   setSnapshot: (snapshot) => set({ snapshot }),
+  canvasControls: null,
+  setCanvasControls: (canvasControls) => set({ canvasControls }),
   setSelection: (selection) => set({ selection }),
   setMode: (mode) => set({ mode }),
   setCompile: (compileStatus, diagnostics, hex) =>
