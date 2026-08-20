@@ -89,7 +89,7 @@ const Env = z.object({
    * accounts are free, and an allowance handed to an unconfirmed one is an allowance handed to
    * anybody who can type an address.
    */
-  RJ_SIGNUP_CREDITS: z.coerce.number().int().nonnegative().default(500),
+  RJ_SIGNUP_CREDITS: z.coerce.number().int().nonnegative().default(100),
 
   /**
    * Whether an address has to be proved before an account can take a seat.

@@ -73,6 +73,7 @@ whichever request happened to need it first.
 | `RJ_ACCESS_IDLE_MINUTES` | `2` | Untouched seat passes to the next person. |
 | `RJ_TRUST_PROXY` | `false` | Turn on **only** behind something that sets `X-Forwarded-For`. Trusting it otherwise lets any client claim any address and every per-address limit becomes decorative. |
 | `RJ_DB_SSL` | `false` | Verify the server certificate. |
+| `RJ_SIGNUP_CREDITS` | `100` | Credits a confirmed account starts with. Granted on confirmation, not signup: accounts are free, so an allowance given to an unconfirmed address is one given to anybody who can type an address. |
 | `GEMINI_API_KEY` | — | Optional. Without it datasheet extraction reports itself unavailable and everything else works. |
 | `RJ_PUBLIC_URL` | `http://localhost:28610` | Where the app is reached from. Every link in outgoing mail is built from it, so it cannot be guessed from a request — a `Host` header is attacker-controlled. Production refuses to start if this is still localhost. |
 | `RJ_REQUIRE_VERIFIED_EMAIL` | `true` | Whether an address must be confirmed before an account can take a seat. |
@@ -147,3 +148,18 @@ Only Postgres holds anything worth keeping:
 ```bash
 docker compose exec postgres pg_dump -U robo robo_journey | gzip > backup.sql.gz
 ```
+
+## Credits
+
+AI features are metered. A confirmed account starts with `RJ_SIGNUP_CREDITS`, and every movement
+is recorded in a ledger the balance is checked against.
+
+To hand existing confirmed accounts an allowance -- after a change to the starting figure, or for
+accounts that confirmed before credits existed:
+
+```bash
+DATABASE_URL=postgres://... node packages/accounts/dist/backfill-credits.js 100
+```
+
+Safe to run repeatedly. Each grant carries the reference the signup grant uses, and a referenced
+grant is honoured once, so this tops up whoever is missing it and does nothing for whoever is not.
