@@ -162,6 +162,14 @@ export class AccessController {
     this.migrate();
   }
 
+  /**
+   * Create or update the table.
+   *
+   * The order here is not cosmetic and was got wrong once: the index covers `queue_seq`, so it has
+   * to be created *after* the column exists. On a fresh database the CREATE TABLE provides it and
+   * either order works, which is exactly why every test passed while the service refused to start
+   * against a database made an hour earlier.
+   */
   private migrate(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS access (
@@ -177,19 +185,20 @@ export class AccessController {
         carry_ms       INTEGER,
         last_reason    TEXT
       );
-      CREATE INDEX IF NOT EXISTS access_queue ON access(state, queue_seq);
     `);
 
-    // The queue was originally ordered by timestamp, with the user id as a tiebreak. Two people
-    // joining in the same millisecond were then ordered by a random UUID, which is not first come
-    // first served -- and worse, it silently moved someone who had already been told they were
-    // next. A counter has no ties.
+    // Columns added after the table first shipped. `queue_seq` replaced ordering by timestamp with
+    // the user id as a tiebreak, which was not first come first served: two people joining in the
+    // same millisecond were ordered by a random UUID, and one who had been told they were next
+    // could be silently moved. A counter has no ties.
     const columns = this.db.prepare('PRAGMA table_info(access)').all() as { name: string }[];
     const has = (name: string) => columns.some((column) => column.name === name);
     if (!has('queue_seq')) this.db.exec('ALTER TABLE access ADD COLUMN queue_seq INTEGER');
     if (!has('last_active_at')) this.db.exec('ALTER TABLE access ADD COLUMN last_active_at TEXT');
     if (!has('carry_ms')) this.db.exec('ALTER TABLE access ADD COLUMN carry_ms INTEGER');
     if (!has('last_reason')) this.db.exec('ALTER TABLE access ADD COLUMN last_reason TEXT');
+
+    this.db.exec('CREATE INDEX IF NOT EXISTS access_queue ON access(state, queue_seq)');
   }
 
   // --- Reading ------------------------------------------------------------------------------------

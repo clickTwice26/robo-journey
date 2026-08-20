@@ -529,3 +529,66 @@ describe('access control', () => {
     }
   });
 });
+
+/**
+ * Migrating a database that already exists.
+ *
+ * Every test above starts from an empty `:memory:` database, where the CREATE TABLE provides every
+ * column and the migration has nothing to do. That is not the case that breaks: the service
+ * refused to start against a database made an hour earlier, because the index over a new column
+ * was being created before the column was added. These build the older shape by hand.
+ */
+describe('migration', () => {
+  const OLD_SCHEMA = `
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL, created_at TEXT NOT NULL
+    );
+    CREATE TABLE access (
+      user_id        TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      state          TEXT NOT NULL,
+      queued_at      TEXT,
+      started_at     TEXT,
+      expires_at     TEXT,
+      cooldown_until TEXT,
+      last_seen_at   TEXT NOT NULL
+    );
+  `;
+
+  it('adds the columns a database from before them is missing', async () => {
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(':memory:');
+    db.exec(OLD_SCHEMA);
+    // A user for the access row to reference, as any real database would have.
+    db.prepare(
+      `INSERT INTO users VALUES ('u1', 'a@example.com', 'A', 'x', '2026-01-01T00:00:00.000Z')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO access (user_id, state, queued_at, last_seen_at) VALUES ('u1', 'idle', NULL, '2026-01-01T00:00:00.000Z')`,
+    ).run();
+
+    const { AccessController } = await import('../src/access.js');
+    expect(() => new AccessController(db)).not.toThrow();
+
+    const columns = (db.prepare('PRAGMA table_info(access)').all() as { name: string }[]).map(
+      (c) => c.name,
+    );
+    for (const added of ['queue_seq', 'last_active_at', 'carry_ms', 'last_reason']) {
+      expect(columns, added).toContain(added);
+    }
+    // And the row that was already there survives.
+    expect(db.prepare('SELECT COUNT(*) AS n FROM access').get()).toEqual({ n: 1 });
+    db.close();
+  });
+
+  it('is safe to run twice', async () => {
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(':memory:');
+    db.exec(OLD_SCHEMA);
+
+    const { AccessController } = await import('../src/access.js');
+    new AccessController(db);
+    expect(() => new AccessController(db)).not.toThrow();
+    db.close();
+  });
+});

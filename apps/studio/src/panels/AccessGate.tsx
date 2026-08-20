@@ -296,7 +296,10 @@ function QueueLine({ position, waiting, capacity, active }: {
         {seats.map((filled, i) =>
           dot(`seat-${i}`, filled, false, filled ? 'Seat in use' : 'Free seat'),
         )}
-        <Box sx={{ width: 1, height: 18, bgcolor: 'divider', mx: 0.75 }} />
+        {/* Seats to the left of this, the line to the right. `'1px'` and not `1`: in MUI's
+            style system a bare number between 0 and 1 is a fraction, so `width: 1` renders a
+            full-width bar that pushes the queue onto its own row. */}
+        <Box sx={{ width: '1px', alignSelf: 'stretch', minHeight: 16, bgcolor: 'divider', mx: 0.75 }} />
         {shown.map((place, index) => (
           <Box key={`place-${place}`} sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
             {index > 0 && shown[index - 1]! < place - 1 && (
@@ -380,6 +383,10 @@ function Queued({ gate, access }: { gate: Gate; access: AccessStatus }) {
 
 function Cooldown({ gate, access }: { gate: Gate; access: AccessStatus }) {
   const remaining = useCountdown(access.cooldownUntil);
+  // From the occupancy poll, not from `access`. Nothing heartbeats during a cooldown, so the
+  // counts inside `access` are frozen at whatever they were when the page loaded -- which read
+  // "0 of 10 in use" on a completely full server.
+  const seats = gate.occupancy ?? access;
   const over = remaining !== null && remaining <= 0;
 
   // Rejoin as soon as the clock runs out, without making anyone watch for the moment.
@@ -402,7 +409,7 @@ function Cooldown({ gate, access }: { gate: Gate; access: AccessStatus }) {
           automatically when it ends.
         </Typography>
         <Typography variant="caption" color="text.secondary" align="center">
-          Your circuits are saved. Nothing is lost — {access.active} of {access.capacity} seats are
+          Your circuits are saved. Nothing is lost — {seats.active} of {seats.capacity} seats are
           in use right now.
         </Typography>
 
@@ -416,6 +423,7 @@ function Cooldown({ gate, access }: { gate: Gate; access: AccessStatus }) {
 
 function Idle({ gate, access }: { gate: Gate; access: AccessStatus | null }) {
   const [busy, setBusy] = useState(false);
+  // Live counts for the same reason as the cooldown screen: nothing is heartbeating here either.
 
   return (
     <Shell>
