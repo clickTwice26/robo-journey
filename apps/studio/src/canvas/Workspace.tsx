@@ -27,6 +27,7 @@ import {
 import { AmmeterShape, MultimeterShape, OscilloscopeShape } from './instruments.tsx';
 import { STIMULUS_SHAPES } from './stimulus.tsx';
 import { AnimatedPart, isAnimated } from './animated.tsx';
+import { SensingLayer } from './sensing.tsx';
 import {
   BreadboardShape,
   ButtonShape,
@@ -336,6 +337,9 @@ export function Workspace({ width, height, onControls, onPartContextMenu }: Prop
       {/* Static artwork. Redrawn only when the project changes. */}
       <Layer>
         <GridDots width={width} height={height} view={view} />
+        {/* Under the parts, so a coupling line runs behind the things it connects rather than
+            across their faces. */}
+        <SensingLayer project={project} driven={snapshot.driven} />
         {project.parts.map((part) => {
           const selected = selection === part.id;
           const common = { part, selected };

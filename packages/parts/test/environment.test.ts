@@ -15,11 +15,14 @@ import {
   buildCircuit,
   libraryProject,
   environmentSources,
+  contributionAt,
   fieldAt,
   installBuiltinManifests,
   isDriven,
   parseProject,
   partDefinition,
+  reachFraction,
+  reaches,
   type EnvironmentSource,
 } from '../src/index.js';
 
@@ -286,5 +289,61 @@ describe('the smoke alarm project', () => {
 
   it('stays quiet with the fire across the bench', () => {
     expect(alarmOutput(200)).toBeLessThan(180);
+  });
+});
+
+describe('what the canvas draws', () => {
+  /**
+   * The drawing has to be the arithmetic.
+   *
+   * A picture derived from a second, similar-looking calculation is a picture that can disagree
+   * with the simulation -- and the whole point of marking the coupling is to be able to trust it
+   * when it says nothing is reaching a sensor.
+   */
+  const lamp = source({ quantity: 'light', intensity: 800, reachMm: 50 });
+
+  it('delivers what the field says it delivers', () => {
+    // A source on its own contributes exactly what the field reports over a zero ambient.
+    for (const d of [0, 25, 50, 120]) {
+      expect(contributionAt(lamp, d, 0)).toBeCloseTo(fieldAt([lamp], 'light', d, 0, 0), 9);
+    }
+  });
+
+  it('calls it a reach while it is still worth a hundredth of the source', () => {
+    expect(reaches(lamp, 0, 0)).toBe(true);
+    expect(reaches(lamp, 50, 0)).toBe(true);
+    // Ten reaches out, an inverse square has thrown away more than 99% of it.
+    expect(reaches(lamp, 550, 0)).toBe(false);
+  });
+
+  it('draws nothing from a source that is switched off', () => {
+    const off = source({ active: false });
+    expect(reaches(off, 0, 0)).toBe(false);
+    expect(contributionAt(off, 0, 0)).toBe(0);
+  });
+
+  it('reports a fraction that matches the falloff', () => {
+    expect(reachFraction(lamp, 0, 0)).toBeCloseTo(1, 6);
+    expect(reachFraction(lamp, 50, 0)).toBeCloseTo(0.5, 6);
+  });
+
+  it('says the water is not reaching the probe in the project that raised this', () => {
+    // The soil monitor ships the water switched off and 60 mm from the probe. Water has a hard
+    // edge at its reach, so at that distance it delivers nothing -- the probe reads "dry", and it
+    // is right to. Nothing should be drawn between them.
+    installBuiltinManifests();
+    const project = libraryProject('soil-monitor')!.build();
+    const soil = project.parts.find((p) => p.id === 'soil')!;
+    const on = {
+      ...project,
+      parts: project.parts.map((p) => (p.id === 'water' ? { ...p, props: { ...p.props, on: true } } : p)),
+    };
+
+    const water = environmentSources(on).find((s) => s.quantity === 'moisture')!;
+    expect(reaches(water, soil.x, soil.y)).toBe(false);
+
+    // Dropped onto the probe, it reaches.
+    const touching = { ...water, x: soil.x, y: soil.y };
+    expect(reaches(touching, soil.x, soil.y)).toBe(true);
   });
 });

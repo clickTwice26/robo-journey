@@ -181,6 +181,42 @@ export function fieldAt(
   }
 }
 
+/**
+ * What one source delivers to a point, on its own.
+ *
+ * Exported so the canvas can draw the coupling rather than illustrate it: the line it puts between
+ * a flame and a sensor is this number, not a guess that happens to look similar. A drawing derived
+ * from the same arithmetic as the simulation cannot disagree with it.
+ */
+export function contributionAt(source: EnvironmentSource, x: number, y: number): number {
+  if (!source.active) return 0;
+  const model = MODELS[source.quantity];
+  if (model.combine === 'nearest') {
+    // Distance is not delivered, it is measured. An obstacle always "reaches" a rangefinder; what
+    // varies is the number it produces.
+    return source.intensity;
+  }
+  return attenuate(source, distanceMm(x, y, source.x, source.y), model.falloff);
+}
+
+/**
+ * Whether a source is doing anything measurable at a point.
+ *
+ * A hundredth of its own strength is the threshold: below that it is arithmetic rather than an
+ * effect, and drawing a line for it would clutter the canvas with couplings nobody can observe.
+ */
+export function reaches(source: EnvironmentSource, x: number, y: number): boolean {
+  if (!source.active) return false;
+  const delivered = contributionAt(source, x, y);
+  return Math.abs(delivered) > Math.abs(source.intensity) * 0.01;
+}
+
+/** Fraction of a source's own strength arriving at a point, 0 to 1. */
+export function reachFraction(source: EnvironmentSource, x: number, y: number): number {
+  if (source.intensity === 0) return 0;
+  return Math.min(1, Math.abs(contributionAt(source, x, y) / source.intensity));
+}
+
 /** True when at least one active source of this quantity exists, so the UI can say who is driving. */
 export function isDriven(sources: readonly EnvironmentSource[], quantity: Quantity): boolean {
   return sources.some((s) => s.quantity === quantity && s.active);
