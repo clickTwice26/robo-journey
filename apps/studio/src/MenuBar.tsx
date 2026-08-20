@@ -595,6 +595,19 @@ export function MenuBar({
 
         <Box sx={{ flex: 1 }} />
 
+        {/* The assistant is otherwise a tab behind the editor, which is a poor place for the one
+            feature nobody knows is there. A button says it exists. */}
+        <Tooltip title="Ask about the circuit on screen. It can see your parts, wiring, sketch and faults.">
+          <Button
+            size="small"
+            startIcon={<AutoAwesomeIcon />}
+            onClick={() => actions?.showPanel('assistant')}
+            sx={{ mr: 1 }}
+          >
+            Ask AI
+          </Button>
+        </Tooltip>
+
         {snapshot.stoppedAt !== null && (
           <Chip size="small" color="warning" label={`stopped at 0x${snapshot.stoppedAt.toString(16).toUpperCase().padStart(4, '0')}`} />
         )}
