@@ -102,10 +102,6 @@ function Rules() {
   return (
     <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 2 }}>
       Accounts are free. Only so many people can use the simulator at once, for an hour each;
-      everyone else waits in line and is let in automatically. A seat has to be used — two minutes
-      with nobody at the keyboard and it passes to the next person, though your remaining time
-      comes with you. When your hour ends there is a 20-minute wait before another turn, and
-      ending a session early counts the same.
     </Typography>
   );
 }

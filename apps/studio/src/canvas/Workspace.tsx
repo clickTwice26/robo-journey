@@ -451,12 +451,22 @@ export function Workspace({ width, height, onControls, onPartContextMenu }: Prop
 }
 
 /** A wire's colour, tinted toward its measured voltage once the simulation is running. */
-function wireColor(base: string, voltage: number | undefined): string {
-  if (voltage === undefined) return base;
+/**
+ * What colour to draw a wire.
+ *
+ * `base` is typed as required and the schema defaults it, but a project object built in code --
+ * an example, a fixture, anything that skips `parseProject` -- can arrive without one, and an
+ * undefined stroke makes Konva draw nothing at all. A wire that is silently invisible reads as a
+ * connection that was never made, which is a bad way to lose half an hour.
+ */
+function wireColor(base: string | undefined, voltage: number | undefined): string {
+  if (voltage === undefined) return base || palette.wireDefault;
   if (voltage > 3) return '#ff6b5a';
   if (voltage < 1.5) return '#4a5568';
   return '#f5a524';
 }
+
+/** A wire is a line between two points; if either end is unknown there is nothing to draw. */
 
 function PendingWire({ from }: { from: Point }) {
   return (

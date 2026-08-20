@@ -16,7 +16,9 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['packages/*/test/**/*.test.ts'],
+    // The app is included too. Its canvas layout is real logic and was wrong in a way no
+    // package-level test could have caught.
+    include: ['packages/*/test/**/*.test.ts', 'apps/*/test/**/*.test.ts'],
     // Brings up a Postgres and a Redis for the run, and takes them away afterwards. Suites that
     // need them skip when Docker is not available rather than failing.
     globalSetup: ['./test/containers.ts'],

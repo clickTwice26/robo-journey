@@ -23,6 +23,7 @@ import {
   type PartDefinition,
   type PartInstance,
 } from '@robo-journey/parts';
+import { bandHeightOf, bodyLayout, fitText, rowKey } from './part-layout.ts';
 import { canvas } from '../theme.ts';
 
 /** Pixels per millimetre at 100% zoom. */
@@ -411,19 +412,30 @@ export function GenericPartShape({
   const appearance = definition.appearance;
   const body = appearance?.bodyColor ?? '#2b3038';
 
-  /**
-   * Whether pin names fit on the body.
-   *
-   * Labels run vertically at roughly 0.62 mm per character. A TO-92 is 6 mm tall and "collector"
-   * is nine characters, so on a small package the names spill across the whole part and bury the
-   * part number -- which is the one thing that identifies it. Hovering a pin still names it at any
-   * size, so dropping the label costs nothing and buying back the title is worth a lot.
-   */
-  const longestPin = Math.max(0, ...definition.pins.map((pin) => pin.name.length));
-  const labelsFit = definition.height >= longestPin * 0.62 + 2;
+  const title = appearance?.title ?? definition.label;
+  const subtitle = appearance?.subtitle;
+  const hasSubtitle = Boolean(subtitle);
 
-  /** Bottom of the lowest pin, so text can sit clear of them. */
-  const pinRowBottom = mm(Math.max(0, ...definition.pins.map((pin) => pin.y))) + 3;
+  // Sized to the body rather than to a fixed scale, because a name that does not fit does not
+  // simply look cramped -- Konva wraps it, and the second line lands on whatever is below. An
+  // AMS1117-3.3 on a SOT-223 is seven millimetres wide and its own part number is eleven
+  // characters, so this is the common case and not the edge one.
+  const titleSize = fitText(title, width - 6, Math.min(9, Math.max(5, width / 7)));
+  const subtitleSize = subtitle
+    ? fitText(subtitle, width - 6, Math.min(6, Math.max(4, width / 11)))
+    : 0;
+  const textHeight = titleSize + (hasSubtitle ? subtitleSize + 2 : 0);
+
+  const layout = bodyLayout(definition, textHeight / PX_PER_MM);
+  const band = layout.titleBand;
+  // Centred in the gap the pins left, and only drawn when the gap can hold it: a name half off the
+  // body is worse than no name.
+  const textTop = band ? mm(band.top) + Math.max(0, (mm(bandHeightOf(band)) - textHeight) / 2) : 0;
+
+  /** The header strip a pin row sits on, so a row of pins reads as a connector. */
+  const pinYs = definition.pins.map((pin) => pin.y);
+  const headerTop = mm(Math.min(...pinYs)) - 3;
+  const headerHeight = mm(Math.max(...pinYs) - Math.min(...pinYs)) + 6;
 
   return (
     <Group>
@@ -436,31 +448,37 @@ export function GenericPartShape({
         strokeWidth={selected ? 2 : 1}
       />
 
+      <Rect y={headerTop} width={width} height={headerHeight} fill="#00000026" listening={false} />
+
       {/* A pin-1 marker, the way every IC package carries one. */}
       <Circle x={mm(1.4)} y={mm(1.4)} radius={1.6} fill="#ffffff33" listening={false} />
 
-      {/* Placed below the pin row rather than centred, so a single-row package does not draw its
-          name straight through its own pins. */}
-      <Text
-        x={3}
-        y={pinRowBottom + 4}
-        width={width - 6}
-        align="center"
-        text={appearance?.title ?? definition.label}
-        fontSize={Math.min(9, Math.max(5, width / 7))}
-        fontStyle="bold"
-        fill="#e9eef5"
-        listening={false}
-      />
-      {appearance?.subtitle && (
+      {band && (
         <Text
           x={3}
-          y={pinRowBottom + 4 + Math.min(9, Math.max(5, width / 7)) + 2}
+          y={textTop}
           width={width - 6}
           align="center"
-          text={appearance.subtitle}
-          fontSize={Math.min(6, Math.max(4, width / 11))}
+          text={title}
+          fontSize={titleSize}
+          fontStyle="bold"
+          fill="#e9eef5"
+          wrap="none"
+          ellipsis
+          listening={false}
+        />
+      )}
+      {band && hasSubtitle && (
+        <Text
+          x={3}
+          y={textTop + titleSize + 2}
+          width={width - 6}
+          align="center"
+          text={subtitle!}
+          fontSize={subtitleSize}
           fill="#9aa4b2"
+          wrap="none"
+          ellipsis
           listening={false}
         />
       )}
@@ -480,32 +498,38 @@ export function GenericPartShape({
       )}
 
       {/* Pins, drawn where the manifest actually puts them. */}
-      {definition.pins.map((pin) => (
-        <Group key={pin.name}>
-          <Rect
-            x={mm(pin.x) - 2.2}
-            y={mm(pin.y) - 2.2}
-            width={4.4}
-            height={4.4}
-            fill="#0a0c0f"
-            cornerRadius={0.8}
-            listening={false}
-          />
-          <Circle x={mm(pin.x)} y={mm(pin.y)} radius={1.4} fill={canvas.pinBrass} listening={false} />
-          {showLabels && labelsFit && (
-            <Text
-              x={mm(pin.x) + 2.2}
-              y={mm(pin.y) + 3.4}
-              text={pin.name}
-              fontSize={5}
-              fontStyle="bold"
-              fill="#f2ffff"
-              rotation={90}
+      {definition.pins.map((pin) => {
+        const up = layout.labelUp.get(rowKey(pin)) ?? false;
+        return (
+          <Group key={pin.name}>
+            <Rect
+              x={mm(pin.x) - 2.2}
+              y={mm(pin.y) - 2.2}
+              width={4.4}
+              height={4.4}
+              fill="#0a0c0f"
+              cornerRadius={0.8}
               listening={false}
             />
-          )}
-        </Group>
-      ))}
+            <Circle x={mm(pin.x)} y={mm(pin.y)} radius={1.4} fill={canvas.pinBrass} listening={false} />
+            {showLabels && layout.labelsFit && (
+              // Konva runs text away from the anchor along the rotated axis, so -90 reads upward
+              // and puts the glyph column on the opposite side of the anchor. That is why the
+              // horizontal nudge flips with the direction.
+              <Text
+                x={mm(pin.x) + (up ? -2.2 : 2.2)}
+                y={mm(pin.y) + (up ? -3.4 : 3.4)}
+                text={pin.name}
+                fontSize={5}
+                fontStyle="bold"
+                fill="#f2ffff"
+                rotation={up ? -90 : 90}
+                listening={false}
+              />
+            )}
+          </Group>
+        );
+      })}
     </Group>
   );
 }
