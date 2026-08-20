@@ -2,6 +2,12 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.tsx';
 import { useStudio } from './store.ts';
+import {
+  manifestToPartDefinition,
+  parseManifest,
+  registerPart,
+  validateManifest,
+} from '@robo-journey/parts';
 import './index.css';
 
 /**
@@ -12,7 +18,12 @@ import './index.css';
  * an app bug. Stripped from production builds by the DEV guard.
  */
 if (import.meta.env.DEV) {
-  (globalThis as { __studio?: typeof useStudio }).__studio = useStudio;
+  Object.assign(globalThis, {
+    __studio: useStudio,
+    // Enough to load a manifest by hand and see it on the canvas, which is how a rendering
+    // problem gets reproduced without spending an extraction each time.
+    __parts: { registerPart, manifestToPartDefinition, parseManifest, validateManifest },
+  });
 }
 
 const container = document.getElementById('root');

@@ -23,7 +23,13 @@ export {
   registeredParts,
   unregisterPart,
 } from './registry.js';
-export type { BuildContext, PartCategory, PartDefinition, PartPin } from './registry.js';
+export type {
+  BuildContext,
+  PartAppearance,
+  PartCategory,
+  PartDefinition,
+  PartPin,
+} from './registry.js';
 
 export {
   ProjectSchema,

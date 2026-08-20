@@ -27,6 +27,7 @@ import {
 import {
   BreadboardShape,
   ButtonShape,
+  GenericPartShape,
   LABEL_ZOOM_THRESHOLD,
   LedShape,
   PX_PER_MM,
@@ -354,7 +355,16 @@ export function Workspace({ width, height, onControls, onPartContextMenu }: Prop
             part.type === 'resistor' ? <ResistorShape {...common} /> :
             part.type === 'led' ? <LedShape {...common} brightness={snapshot.brightness[part.id] ?? 0} /> :
             part.type === 'pushbutton' ? <ButtonShape {...common} /> :
-            null;
+            // Anything else -- every component extracted from a datasheet -- gets a generic body.
+            // Falling through to null here is what made generated parts invisible, leaving only
+            // their pin hit-targets on the canvas.
+            definition ? (
+              <GenericPartShape
+                {...common}
+                definition={definition}
+                showLabels={view.scale >= LABEL_ZOOM_THRESHOLD}
+              />
+            ) : null;
 
           if (!shape) return null;
 

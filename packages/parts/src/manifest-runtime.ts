@@ -415,8 +415,9 @@ export function manifestToPartDefinition(
   options: { supplyVolts?: number } = {},
 ): PartDefinition {
   const supplyVolts = options.supplyVolts ?? 5;
+  const layout = normaliseLayout(manifest);
 
-  const pins: PartPin[] = manifest.pins.map((pin) => ({
+  const pins: PartPin[] = layout.pins.map((pin) => ({
     name: pin.name,
     x: pin.x,
     y: pin.y,
@@ -430,10 +431,16 @@ export function manifestToPartDefinition(
     type: manifest.id,
     label: manifest.name,
     category: mapCategory(manifest.category),
-    width: manifest.package.widthMm,
-    height: manifest.package.heightMm,
+    width: layout.width,
+    height: layout.height,
     pins,
     defaults,
+    appearance: {
+      bodyColor: manifest.package.bodyColor,
+      title: manifest.partNumber || manifest.name,
+      ...(manifest.package.type ? { subtitle: manifest.package.type } : {}),
+      generated: manifest.provenance.source === 'datasheet-ai',
+    },
     build(ctx) {
       const state = new ComponentState(manifest.state);
       for (const variable of manifest.state) {
@@ -442,7 +449,7 @@ export function manifestToPartDefinition(
       }
 
       const nodes = new Map<string, number>();
-      for (const pin of manifest.pins) nodes.set(pin.name, ctx.node(pin.name));
+      for (const pin of layout.pins) nodes.set(pin.name, ctx.node(pin.name));
 
       // Pin models that are really their own component get real devices, so a built-in LED gets
       // the same Newton treatment as one the user placed.
@@ -462,6 +469,48 @@ export function manifestToPartDefinition(
 
       ctx.add(new ManifestDevice(ctx.partId, { manifest, state, nodes, supplyVolts }));
     },
+  };
+}
+
+/** Smallest body the canvas can render legibly, millimetres. */
+const MIN_BODY_MM = 6;
+/** Clearance kept between a pin and the body's edge. */
+const PIN_MARGIN_MM = 1.2;
+
+/**
+ * Bring pins and package into agreement.
+ *
+ * Extraction frequently lays pins out around an origin rather than from a corner, so some come
+ * back negative -- which draws them outside the body, or off it entirely. Rather than reject an
+ * otherwise good manifest, shift everything into the positive quadrant and grow the package to
+ * contain it. The validator still warns, so the user knows the datasheet's drawing was not
+ * followed literally, but the part is usable.
+ */
+function normaliseLayout(manifest: ComponentManifest): {
+  pins: ComponentManifest['pins'];
+  width: number;
+  height: number;
+} {
+  const xs = manifest.pins.map((pin) => pin.x);
+  const ys = manifest.pins.map((pin) => pin.y);
+  const minX = Math.min(0, ...xs);
+  const minY = Math.min(0, ...ys);
+
+  // Shift so nothing is negative, leaving a margin so pins sit on the body rather than its edge.
+  const dx = minX < 0 ? -minX + PIN_MARGIN_MM : 0;
+  const dy = minY < 0 ? -minY + PIN_MARGIN_MM : 0;
+
+  const pins = dx === 0 && dy === 0
+    ? manifest.pins
+    : manifest.pins.map((pin) => ({ ...pin, x: pin.x + dx, y: pin.y + dy }));
+
+  const maxX = Math.max(...pins.map((pin) => pin.x));
+  const maxY = Math.max(...pins.map((pin) => pin.y));
+
+  return {
+    pins,
+    width: Math.max(MIN_BODY_MM, manifest.package.widthMm, maxX + PIN_MARGIN_MM),
+    height: Math.max(MIN_BODY_MM, manifest.package.heightMm, maxY + PIN_MARGIN_MM),
   };
 }
 

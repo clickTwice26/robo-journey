@@ -17,7 +17,12 @@ import {
   rowOffset,
   type BreadboardSpec,
 } from '@robo-journey/sim-core';
-import { PITCH_MM, partDefinition, type PartInstance } from '@robo-journey/parts';
+import {
+  PITCH_MM,
+  partDefinition,
+  type PartDefinition,
+  type PartInstance,
+} from '@robo-journey/parts';
 import { canvas } from '../theme.ts';
 
 /** Pixels per millimetre at 100% zoom. */
@@ -378,6 +383,129 @@ export function ButtonShape({ part, selected }: ShapeProps) {
         radius={mm(1.6)}
         fill={pressed ? '#8c2f2f' : '#c0392b'}
       />
+    </Group>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Generic body for a part with no bespoke artwork.
+ *
+ * Every component extracted from a datasheet lands here. Without it such a part draws as nothing
+ * and only its pin hit-targets appear on the canvas, which reads as a broken component rather than
+ * a working one the renderer has never seen.
+ *
+ * Deliberately schematic rather than photographic: a body, real pin positions, and the part number.
+ * Pretending to know what an unfamiliar package looks like would be a worse lie than drawing a
+ * labelled rectangle.
+ */
+export function GenericPartShape({
+  part,
+  selected,
+  definition,
+  showLabels = false,
+}: ShapeProps & { definition: PartDefinition; showLabels?: boolean }) {
+  const width = mm(definition.width);
+  const height = mm(definition.height);
+  const appearance = definition.appearance;
+  const body = appearance?.bodyColor ?? '#2b3038';
+
+  /**
+   * Whether pin names fit on the body.
+   *
+   * Labels run vertically at roughly 0.62 mm per character. A TO-92 is 6 mm tall and "collector"
+   * is nine characters, so on a small package the names spill across the whole part and bury the
+   * part number -- which is the one thing that identifies it. Hovering a pin still names it at any
+   * size, so dropping the label costs nothing and buying back the title is worth a lot.
+   */
+  const longestPin = Math.max(0, ...definition.pins.map((pin) => pin.name.length));
+  const labelsFit = definition.height >= longestPin * 0.62 + 2;
+
+  /** Bottom of the lowest pin, so text can sit clear of them. */
+  const pinRowBottom = mm(Math.max(0, ...definition.pins.map((pin) => pin.y))) + 3;
+
+  return (
+    <Group>
+      <Rect
+        width={width}
+        height={height}
+        fill={body}
+        cornerRadius={2}
+        stroke={selected ? canvas.selection : '#00000066'}
+        strokeWidth={selected ? 2 : 1}
+      />
+
+      {/* A pin-1 marker, the way every IC package carries one. */}
+      <Circle x={mm(1.4)} y={mm(1.4)} radius={1.6} fill="#ffffff33" listening={false} />
+
+      {/* Placed below the pin row rather than centred, so a single-row package does not draw its
+          name straight through its own pins. */}
+      <Text
+        x={3}
+        y={pinRowBottom + 4}
+        width={width - 6}
+        align="center"
+        text={appearance?.title ?? definition.label}
+        fontSize={Math.min(9, Math.max(5, width / 7))}
+        fontStyle="bold"
+        fill="#e9eef5"
+        listening={false}
+      />
+      {appearance?.subtitle && (
+        <Text
+          x={3}
+          y={pinRowBottom + 4 + Math.min(9, Math.max(5, width / 7)) + 2}
+          width={width - 6}
+          align="center"
+          text={appearance.subtitle}
+          fontSize={Math.min(6, Math.max(4, width / 11))}
+          fill="#9aa4b2"
+          listening={false}
+        />
+      )}
+
+      {/* Generated parts are marked on the canvas, not only in the palette -- the distinction
+          matters most when you are looking at the circuit and wondering whether to trust it. */}
+      {appearance?.generated && (
+        <Text
+          x={width - 12}
+          y={3}
+          text="AI"
+          fontSize={5}
+          fontStyle="bold"
+          fill={canvas.selection}
+          listening={false}
+        />
+      )}
+
+      {/* Pins, drawn where the manifest actually puts them. */}
+      {definition.pins.map((pin) => (
+        <Group key={pin.name}>
+          <Rect
+            x={mm(pin.x) - 2.2}
+            y={mm(pin.y) - 2.2}
+            width={4.4}
+            height={4.4}
+            fill="#0a0c0f"
+            cornerRadius={0.8}
+            listening={false}
+          />
+          <Circle x={mm(pin.x)} y={mm(pin.y)} radius={1.4} fill={canvas.pinBrass} listening={false} />
+          {showLabels && labelsFit && (
+            <Text
+              x={mm(pin.x) + 2.2}
+              y={mm(pin.y) + 3.4}
+              text={pin.name}
+              fontSize={5}
+              fontStyle="bold"
+              fill="#f2ffff"
+              rotation={90}
+              listening={false}
+            />
+          )}
+        </Group>
+      ))}
     </Group>
   );
 }

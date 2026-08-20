@@ -375,3 +375,111 @@ describe('simulating a manifest', () => {
     expect(board.voltage('A0')).toBeLessThanOrEqual(1.01);
   });
 });
+
+describe('rendering a generated part', () => {
+  afterEach(() => {
+    unregisterPart('neg-pins');
+    unregisterPart('tiny');
+  });
+
+  /** Build a minimal manifest with the pin coordinates under test. */
+  const withPins = (id: string, pins: [string, number, number][]) =>
+    parseManifest({
+      schemaVersion: 1,
+      id,
+      name: id,
+      partNumber: id.toUpperCase(),
+      category: 'passive',
+      package: { type: 'TO-92', widthMm: 4.8, heightMm: 5.2, pinPitchMm: 1.27, bodyColor: '#2b2b2b' },
+      pins: pins.map(([name, x, y]) => ({
+        name,
+        x,
+        y,
+        description: '',
+        model: { kind: 'analog-in', impedanceOhms: 100000 },
+      })),
+      state: [],
+      behavior: { kind: 'passive' },
+      limits: {},
+      provenance: { source: 'datasheet-ai', unresolved: [], verified: false },
+    });
+
+  it('gives every part an appearance, so the canvas can draw it', () => {
+    // Without this a generated part renders as nothing at all and only its pin hit-targets appear,
+    // which reads as a broken component rather than an unfamiliar one.
+    const definition = manifestToPartDefinition(hcsr04());
+    expect(definition.appearance).toBeDefined();
+    expect(definition.appearance!.title).toBe('HC-SR04');
+    expect(definition.appearance!.generated).toBe(false);
+  });
+
+  it('marks datasheet-extracted parts as generated', () => {
+    const manifest = hcsr04();
+    manifest.provenance.source = 'datasheet-ai';
+    expect(manifestToPartDefinition(manifest).appearance!.generated).toBe(true);
+  });
+
+  it('shifts negative pin coordinates onto the body', () => {
+    // Extraction frequently lays pins out around an origin rather than from a corner. Left alone
+    // those pins draw outside the part, or off it entirely.
+    const definition = manifestToPartDefinition(
+      withPins('neg-pins', [['e', -2.54, -1.5], ['b', -1.27, -1.5], ['c', 0, -1.5]]),
+    );
+
+    for (const pin of definition.pins) {
+      expect(pin.x, `${pin.name} x`).toBeGreaterThanOrEqual(0);
+      expect(pin.y, `${pin.name} y`).toBeGreaterThanOrEqual(0);
+      expect(pin.x).toBeLessThanOrEqual(definition.width);
+      expect(pin.y).toBeLessThanOrEqual(definition.height);
+    }
+  });
+
+  it('preserves the spacing between pins while shifting them', () => {
+    // A shift must not distort the footprint: the pitch is what makes legs land in adjacent holes.
+    const definition = manifestToPartDefinition(
+      withPins('neg-pins', [['e', -2.54, -1.5], ['b', -1.27, -1.5], ['c', 0, -1.5]]),
+    );
+    const xs = definition.pins.map((p) => p.x);
+    expect(xs[1]! - xs[0]!).toBeCloseTo(1.27, 6);
+    expect(xs[2]! - xs[1]!).toBeCloseTo(1.27, 6);
+  });
+
+  it('leaves already-valid coordinates alone', () => {
+    const definition = manifestToPartDefinition(
+      withPins('neg-pins', [['a', 1, 1], ['b', 2.27, 1]]),
+    );
+    expect(definition.pins.map((p) => p.x)).toEqual([1, 2.27]);
+  });
+
+  it('grows the body when pins would overrun the stated package', () => {
+    // A datasheet's mechanical drawing and its pin table do not always agree; the part still has
+    // to be drawable.
+    const definition = manifestToPartDefinition(
+      withPins('tiny', [['a', 0, 0], ['b', 40, 0]]),
+    );
+    expect(definition.width).toBeGreaterThan(40);
+  });
+
+  it('never produces a body too small to see', () => {
+    const definition = manifestToPartDefinition(withPins('tiny', [['a', 0, 0]]));
+    expect(definition.width).toBeGreaterThanOrEqual(6);
+    expect(definition.height).toBeGreaterThanOrEqual(6);
+  });
+
+  it('keeps the device wired to the shifted pins', () => {
+    // The nodes are looked up by pin name, so normalisation must not break the electrical model.
+    registerPart(
+      manifestToPartDefinition(withPins('neg-pins', [['a', -5, -5], ['b', -2.46, -5]])),
+    );
+    const project = parseProject({
+      version: 1,
+      parts: [
+        { id: 'uno1', type: 'arduino-uno', x: 0, y: 0 },
+        { id: 'x1', type: 'neg-pins', x: 0, y: 60 },
+      ],
+      wires: [{ id: 'w1', from: 'x1:a', to: 'uno1:A0' }],
+    });
+    const { problems } = buildCircuit(project, { progMem: loadHex(firmware('blink.hex')) });
+    expect(problems).toEqual([]);
+  });
+});

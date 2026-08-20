@@ -43,6 +43,23 @@ export interface BuildContext {
   add(device: Device): void;
 }
 
+/**
+ * How to draw a part the canvas has no bespoke artwork for.
+ *
+ * Built-in components have hand-drawn shapes; anything arriving as a manifest gets a generic body
+ * rendered from this. Without it a generated part draws as nothing at all and only its pin
+ * hit-targets appear -- which looks exactly like a broken component.
+ */
+export interface PartAppearance {
+  readonly bodyColor: string;
+  /** Drawn across the body. Usually the part number. */
+  readonly title: string;
+  /** Smaller line beneath, usually the package type. */
+  readonly subtitle?: string;
+  /** Marks it as extracted rather than built in. */
+  readonly generated?: boolean;
+}
+
 export interface PartDefinition {
   readonly type: string;
   readonly label: string;
@@ -61,6 +78,8 @@ export interface PartDefinition {
   readonly internalSpec?: BreadboardSpec;
   /** Contribute devices. Omitted for parts that are pure connectivity. */
   build?(ctx: BuildContext): void;
+  /** Present on parts without bespoke artwork, telling the canvas how to draw a generic body. */
+  readonly appearance?: PartAppearance;
 }
 
 // ---------------------------------------------------------------------------------------------
