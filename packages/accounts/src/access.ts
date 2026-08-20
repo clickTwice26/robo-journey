@@ -71,6 +71,16 @@ export type AccessState =
   /** A seat has ended recently; must wait before queueing again. */
   | 'cooldown';
 
+/**
+ * What a caller is told about where they stand.
+ *
+ * Deliberately narrow. It carries a place in line and nothing about how many seats exist, how many
+ * are taken, or how long the wait might be -- those are the server's business, and quoting them
+ * invites people to work out when to come back rather than simply waiting to be let in. A wait
+ * estimate in particular is a promise that cannot be kept: it moves whenever anyone leaves early
+ * or drops out, and being told "at most an hour" and then let in at four minutes is no better than
+ * the reverse.
+ */
 export interface AccessStatus {
   readonly state: AccessState;
   /**
@@ -85,23 +95,12 @@ export interface AccessStatus {
   readonly carriedMs: number | null;
   /** Place in line, 1 for next to be admitted. Null unless queued. */
   readonly position: number | null;
-  /** How many are waiting in total. */
+  /** How many are waiting in total, so the line can be drawn. */
   readonly waiting: number;
-  /** How many seats are taken. */
-  readonly active: number;
-  readonly capacity: number;
   /** When the current seat ends, ISO. Null unless active. */
   readonly expiresAt: string | null;
   /** When the cooldown ends, ISO. Null unless in cooldown. */
   readonly cooldownUntil: string | null;
-  /**
-   * Longest this account should have to wait, milliseconds. Null unless queued.
-   *
-   * An upper bound rather than a guess: it assumes every seat ahead runs its full hour and nobody
-   * leaves early or drops out, both of which only make the real wait shorter. A number that can
-   * only improve is worth showing; one that might turn out to be optimistic is not.
-   */
-  readonly estimatedWaitMs: number | null;
 }
 
 export interface AccessConfig {
@@ -207,16 +206,6 @@ export class AccessController {
   status(userId: string): AccessStatus {
     this.reconcile();
     return this.read(userId);
-  }
-
-  /** Seats taken and people waiting, for the sign-in screen. Needs no account. */
-  occupancy(): { active: number; waiting: number; capacity: number } {
-    this.reconcile();
-    return {
-      active: this.countByState('active'),
-      waiting: this.countByState('queued'),
-      capacity: this.capacity,
-    };
   }
 
   // --- Acting -------------------------------------------------------------------------------------
@@ -469,29 +458,18 @@ export class AccessController {
   /** Read a user's standing without reconciling. Always called just after a reconcile. */
   private read(userId: string): AccessStatus {
     const row = this.row(userId);
-    const active = this.countByState('active');
-    const waiting = this.countByState('queued');
     const base = {
-      active,
-      waiting,
-      capacity: this.capacity,
+      waiting: this.countByState('queued'),
       lastReason: row?.last_reason ?? null,
       carriedMs: row?.carry_ms ?? null,
     };
 
     if (!row || row.state === 'idle') {
-      return { ...base, state: 'idle', position: null, expiresAt: null, cooldownUntil: null, estimatedWaitMs: null };
+      return { ...base, state: 'idle', position: null, expiresAt: null, cooldownUntil: null };
     }
 
     if (row.state === 'active') {
-      return {
-        ...base,
-        state: 'active',
-        position: null,
-        expiresAt: row.expires_at,
-        cooldownUntil: null,
-        estimatedWaitMs: null,
-      };
+      return { ...base, state: 'active', position: null, expiresAt: row.expires_at, cooldownUntil: null };
     }
 
     if (row.state === 'cooldown') {
@@ -501,7 +479,6 @@ export class AccessController {
         position: null,
         expiresAt: null,
         cooldownUntil: row.cooldown_until,
-        estimatedWaitMs: null,
       };
     }
 
@@ -510,32 +487,6 @@ export class AccessController {
       .get(row.queue_seq) as { n: number };
     const position = Number(ahead.n) + 1;
 
-    return {
-      ...base,
-      state: 'queued',
-      position,
-      expiresAt: null,
-      cooldownUntil: null,
-      estimatedWaitMs: this.waitEstimate(position),
-    };
-  }
-
-  /**
-   * Upper bound on the wait for a given position.
-   *
-   * Seats free in the order they expire, so the person at position N is admitted no later than the
-   * Nth soonest expiry. Only an upper bound: anyone leaving early or dropping out of the queue
-   * ahead brings it forward.
-   */
-  private waitEstimate(position: number): number | null {
-    const expiries = (
-      this.db
-        .prepare(`SELECT expires_at FROM access WHERE state = 'active' ORDER BY expires_at LIMIT ?`)
-        .all(position) as { expires_at: string }[]
-    ).map((r) => new Date(r.expires_at).getTime());
-
-    // Fewer seats taken than places ahead means one is free already; the next pass admits them.
-    if (expiries.length < position) return 0;
-    return Math.max(0, expiries[position - 1]! - this.now());
+    return { ...base, state: 'queued', position, expiresAt: null, cooldownUntil: null };
   }
 }

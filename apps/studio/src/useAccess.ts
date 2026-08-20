@@ -14,13 +14,11 @@ import { usePresence } from './usePresence.ts';
 import {
   AuthError,
   ServiceUnreachableError,
-  fetchOccupancy,
   fetchSession,
   heartbeat,
   logout as logoutRequest,
   requestAccess,
   type AccessStatus,
-  type Occupancy,
   type User,
 } from './auth.ts';
 
@@ -34,8 +32,6 @@ import {
  */
 const HEARTBEAT_ACTIVE_MS = 30_000;
 const HEARTBEAT_QUEUED_MS = 10_000;
-/** How often the sign-in screen refreshes the occupancy count. */
-const OCCUPANCY_POLL_MS = 15_000;
 
 /**
  * How long without input costs the seat. Must match the server, which is the one that enforces it.
@@ -62,8 +58,6 @@ export interface AccessGate {
   readonly phase: AccessPhase;
   readonly user: User | null;
   readonly access: AccessStatus | null;
-  /** Seats and queue length, kept fresh on the sign-in screen. */
-  readonly occupancy: Occupancy | null;
   readonly error: string | null;
   /**
    * Milliseconds until an idle seat is handed on, or null when there is nothing to warn about.
@@ -92,7 +86,6 @@ export function useAccess(): AccessGate {
   const [phase, setPhase] = useState<AccessPhase>('loading');
   const [user, setUser] = useState<User | null>(null);
   const [access, setAccess] = useState<AccessStatus | null>(null);
-  const [occupancy, setOccupancy] = useState<Occupancy | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   /** Guards against a slow response from a previous phase overwriting a newer one. */
@@ -217,33 +210,10 @@ export function useAccess(): AccessGate {
    * cover exactly this case. Signing out, which is unambiguous, releases the seat properly.
    */
 
-  /** Occupancy, for the sign-in screen -- so a queue is visible before a password is typed. */
-  useEffect(() => {
-    if (phase !== 'signed-out' && phase !== 'idle' && phase !== 'cooldown') return;
-
-    let cancelled = false;
-    const pull = async () => {
-      try {
-        const next = await fetchOccupancy();
-        if (!cancelled) setOccupancy(next);
-      } catch {
-        // The screen works without it; it is a nicety, not a requirement.
-      }
-    };
-
-    void pull();
-    const timer = setInterval(() => void pull(), OCCUPANCY_POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [phase]);
-
   return {
     phase,
     user,
     access,
-    occupancy,
     error,
     idleWarningMs: presence.warningMs,
     adopt,

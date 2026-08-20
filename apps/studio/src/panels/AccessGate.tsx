@@ -5,11 +5,15 @@
  * that is the truth of it: there is no workspace behind the overlay to go back to, and a dialog
  * over a greyed-out canvas would suggest otherwise.
  *
- * The one rule the whole screen is built around is that people should never be surprised. The
- * queue length is on the sign-in form before a password is typed; the wait is quoted as a bound
- * that can only improve; the cooldown counts down rather than saying "later"; and the fact that
- * leaving early still costs twenty minutes is said on the button that does it, not discovered
- * afterwards.
+ * The one rule the whole screen is built around is that people should never be surprised: the
+ * cooldown counts down rather than saying "later", a seat passed on for idleness says so and says
+ * the time is kept, and the fact that leaving early still costs twenty minutes is stated up front
+ * rather than discovered afterwards.
+ *
+ * What it does *not* show is deliberate too. No seat count, no queue length in numbers, no
+ * estimated wait. A wait estimate is a promise that cannot be kept -- it moves every time anyone
+ * leaves early or gives up -- and quoting one invites people to work out when to come back
+ * instead of simply being let in when it is their turn.
  */
 import {
   Alert,
@@ -32,7 +36,7 @@ import GroupsIcon from '@mui/icons-material/Groups';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import { useCallback, useEffect, useState } from 'react';
-import { AuthError, login, register, type AccessStatus, type Occupancy } from '../auth.ts';
+import { AuthError, login, register, type AccessStatus } from '../auth.ts';
 import type { AccessGate as Gate } from '../useAccess.ts';
 
 /** Mirrors the server's minimum, so the hint appears before a round trip rejects it. */
@@ -93,37 +97,11 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Seats taken and people waiting. Shown before sign-in so a queue is never a surprise. */
-function Occupancy({ occupancy }: { occupancy: Occupancy | null }) {
-  if (!occupancy) return null;
-  const full = occupancy.active >= occupancy.capacity;
-
-  return (
-    <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
-      <Chip
-        size="small"
-        icon={<GroupsIcon />}
-        color={full ? 'warning' : 'success'}
-        variant="outlined"
-        label={`${occupancy.active} of ${occupancy.capacity} in use`}
-      />
-      {occupancy.waiting > 0 && (
-        <Chip
-          size="small"
-          icon={<HourglassEmptyIcon />}
-          variant="outlined"
-          label={`${occupancy.waiting} waiting`}
-        />
-      )}
-    </Stack>
-  );
-}
-
 /** The rules, stated once, where someone is about to be subject to them. */
-function Rules({ capacity }: { capacity: number }) {
+function Rules() {
   return (
     <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 2 }}>
-      Accounts are free. {capacity} people can use the simulator at once, for an hour each;
+      Accounts are free. Only so many people can use the simulator at once, for an hour each;
       everyone else waits in line and is let in automatically. A seat has to be used — two minutes
       with nobody at the keyboard and it passes to the next person, though your remaining time
       comes with you. When your hour ends there is a 20-minute wait before another turn, and

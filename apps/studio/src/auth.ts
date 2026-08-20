@@ -13,26 +13,22 @@ export interface User {
   readonly createdAt: string;
 }
 
-/** Where an account stands in the queue. Mirrors the server's `AccessStatus`. */
+/**
+ * Where an account stands in the queue. Mirrors the server's `AccessStatus`.
+ *
+ * A place in line and nothing more. How many seats exist, how many are taken and how long the wait
+ * might be are all absent on purpose -- see the note on the server's own type.
+ */
 export interface AccessStatus {
   readonly state: 'idle' | 'queued' | 'active' | 'cooldown';
   readonly position: number | null;
   readonly waiting: number;
-  readonly active: number;
-  readonly capacity: number;
   readonly expiresAt: string | null;
   readonly cooldownUntil: string | null;
-  readonly estimatedWaitMs: number | null;
   /** Why the last seat ended, so the queue screen can explain itself. */
   readonly lastReason: 'idle' | 'expired' | null;
   /** Time still owed from an interrupted session, carried back on re-admission. */
   readonly carriedMs: number | null;
-}
-
-export interface Occupancy {
-  readonly active: number;
-  readonly waiting: number;
-  readonly capacity: number;
 }
 
 export interface Session {
@@ -141,12 +137,6 @@ export async function login(email: string, password: string): Promise<Session> {
 }
 
 // --- Access -------------------------------------------------------------------------------------
-
-/** How busy the simulator is. The only call here that works signed out. */
-export async function fetchOccupancy(): Promise<Occupancy> {
-  const { occupancy } = await call<{ occupancy: Occupancy }>('/access/occupancy');
-  return occupancy;
-}
 
 /** Ask for a seat, or rejoin the queue after a cooldown. */
 export async function requestAccess(): Promise<AccessStatus> {

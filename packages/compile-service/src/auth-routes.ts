@@ -219,16 +219,6 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
 
   // --- Access ------------------------------------------------------------------------------------
 
-  /**
-   * How busy the place is. The only endpoint here that needs no account.
-   *
-   * Shown on the sign-in screen, so someone can see there is a queue before typing a password
-   * rather than after.
-   */
-  app.get('/access/occupancy', async (_request, reply) =>
-    reply.send({ occupancy: store.access.occupancy() }),
-  );
-
   app.get('/access', async (request, reply) => {
     const user = requireUser(request, reply);
     if (!user) return reply;
