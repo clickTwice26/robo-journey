@@ -53,7 +53,7 @@ import { compileSketch, CompileUnavailableError } from './api.ts';
 import { createProject, saveProject } from './auth.ts';
 import type { AccessGate } from './useAccess.ts';
 import { formatDuration } from './panels/AccessGate.tsx';
-import { downloadProject, openProjectFile } from './projectFile.ts';
+import { downloadProject } from './projectFile.ts';
 import { useStudio } from './store.ts';
 import type { SimulationController } from './sim/useSimulation.ts';
 
@@ -200,18 +200,6 @@ export function MenuBar({
   // straight away rather than after the heartbeat grace expires.
   const signOut = useCallback(() => void gate.signOut(), [gate]);
 
-  const open = useCallback(async () => {
-    try {
-      const loaded = await openProjectFile();
-      if (!loaded) return;
-      useStudio.getState().loadProject(loaded);
-      // A different circuit means the loaded firmware may not match its sketch.
-      useStudio.getState().setCompile('idle', [], null);
-    } catch (caught) {
-      setError((caught as Error).message);
-    }
-  }, []);
-
   const newProject = useCallback(() => {
     useStudio.getState().loadProject(emptyProject('Untitled'));
     useStudio.getState().setCompile('idle', [], null);
@@ -255,7 +243,7 @@ export function MenuBar({
           break;
         case 'o':
           event.preventDefault();
-          void open();
+          onOpenCloudProjects();
           break;
         case 'b':
           event.preventDefault();
@@ -291,7 +279,7 @@ export function MenuBar({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [save, open, build, buildAndRun, saveToAccount]);
+  }, [save, onOpenCloudProjects, build, buildAndRun, saveToAccount]);
 
   // --- Menu definitions ----------------------------------------------------------------------------
 
@@ -302,7 +290,16 @@ export function MenuBar({
         label: 'File',
         items: [
           { label: 'New project', icon: <InsertDriveFileIcon fontSize="small" />, onClick: newProject },
-          { label: 'Open project…', icon: <FolderOpenIcon fontSize="small" />, hint: shortcut('O'), onClick: () => void open() },
+          {
+            // One dialog for both sources. Splitting them -- a file picker here, a saved list in
+            // the account menu -- makes someone decide where their circuit is before they can go
+            // looking for it, and they frequently do not remember.
+            label: 'Open project…',
+            icon: <FolderOpenIcon fontSize="small" />,
+            secondary: 'From a file or from your account',
+            hint: shortcut('O'),
+            onClick: onOpenCloudProjects,
+          },
           { label: 'Save project', icon: <SaveIcon fontSize="small" />, hint: shortcut('S'), onClick: save },
           { divider: true },
           ...EXAMPLES.map((example) => ({
@@ -446,7 +443,7 @@ export function MenuBar({
     ],
     [
       actions, build, buildAndRun, cloudProjectId, close, future.length, hex, loadExample,
-      canvasControls, newProject, onOpenCloudProjects, onOpenDatasheet, open, past.length, save,
+      canvasControls, newProject, onOpenCloudProjects, onOpenDatasheet, past.length, save,
       saveToAccount, selection, signOut, sim, snapshot.running, unplugSelection, user,
     ],
   );
