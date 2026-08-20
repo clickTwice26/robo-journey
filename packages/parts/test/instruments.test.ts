@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { Multimeter, loadHex, type Ammeter } from '@robo-journey/sim-core';
-import { buildCircuit, exampleById, parseProject, probeChannel } from '../src/index.js';
+import { buildCircuit, libraryProject, parseProject, probeChannel } from '../src/index.js';
 
 const firmware = (name: string): string =>
   readFileSync(fileURLToPath(new URL(`../../sim-core/test/fixtures/${name}`, import.meta.url)), 'utf8');
@@ -176,7 +176,7 @@ describe('the probing example', () => {
   it('reads the divider it wires the meter across', () => {
     // The example is only worth shipping if its answer is the one you would work out on paper:
     // 5 V across two equal resistors puts 2.5 V at the junction, and the meter should say so.
-    const project = exampleById('probing')!.build();
+    const project = libraryProject('probing')!.build();
     const { board, devices, problems } = buildCircuit(project, { progMem: blink() });
     expect(problems).toEqual([]);
 
@@ -185,7 +185,7 @@ describe('the probing example', () => {
   });
 
   it('catches the blink on the scope, ground clip and all', () => {
-    const project = exampleById('probing')!.build();
+    const project = libraryProject('probing')!.build();
     const { board } = buildCircuit(project, { progMem: blink() });
     board.runFor(1.2);
 
