@@ -22,8 +22,16 @@ import {
   type AccessStatus,
 } from '@robo-journey/accounts';
 import type { Redis } from 'ioredis';
+import type { Pool } from 'pg';
+import {
+  TokenError,
+  consumeEmailToken,
+  issueEmailToken,
+  type EmailTokenKind,
+} from '@robo-journey/accounts';
 import { RedisRateLimiter } from './redis.js';
 import { SESSION_COOKIE, type Guards } from './session-guard.js';
+import { passwordResetMessage, verificationMessage, type Mailer } from './mailer.js';
 
 /**
  * Limits.
@@ -46,6 +54,10 @@ function createLimiters(redis: Redis) {
     loginByAddress: new RedisRateLimiter(redis, 30, 5 * 60 * 1000, 'login-ip'),
     loginByAccount: new RedisRateLimiter(redis, 5, 15 * 60 * 1000, 'login-account'),
     registerByAddress: new RedisRateLimiter(redis, 40, 60 * 60 * 1000, 'register-ip'),
+    // Mail costs money and reputation, and a resend button is a way to have someone else's inbox
+    // filled. Tight per account and per address.
+    mailByAccount: new RedisRateLimiter(redis, 5, 60 * 60 * 1000, 'mail-account'),
+    mailByAddress: new RedisRateLimiter(redis, 15, 60 * 60 * 1000, 'mail-ip'),
   };
 }
 
@@ -74,12 +86,47 @@ export interface AuthRouteOptions {
   readonly store: AccountStore;
   readonly guards: Guards;
   readonly redis: Redis;
+  readonly pool: Pool;
+  readonly mailer: Mailer;
+  /** Origin the links in outgoing mail point at. */
+  readonly publicUrl: string;
+  /** Whether an address must be proved before an account can take a seat. */
+  readonly requireVerifiedEmail: boolean;
 }
 
 export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptions): void {
-  const { store, guards, redis } = options;
+  const { store, guards, redis, pool, mailer, publicUrl, requireVerifiedEmail } = options;
   const { currentUser, requireUser } = guards;
-  const { loginByAddress, loginByAccount, registerByAddress } = createLimiters(redis);
+  const { loginByAddress, loginByAccount, registerByAddress, mailByAccount, mailByAddress } =
+    createLimiters(redis);
+
+  const linkTo = (path: string, token: string): string =>
+    new URL(`${path}?token=${encodeURIComponent(token)}`, publicUrl).toString();
+
+  /**
+   * Issue a link and send it.
+   *
+   * Never throws into the caller. A mail server having a bad minute must not fail a signup: the
+   * account exists either way, and "we could not send that, try resend" is a far better place to
+   * be than a 500 that leaves someone unsure whether they have an account at all.
+   */
+  const sendLink = async (
+    userId: string,
+    email: string,
+    kind: EmailTokenKind,
+  ): Promise<boolean> => {
+    try {
+      const { token } = await issueEmailToken(pool, userId, email, kind);
+      const message =
+        kind === 'verify'
+          ? verificationMessage(email, linkTo('/verify', token))
+          : passwordResetMessage(email, linkTo('/reset-password', token));
+      return await mailer.send(message);
+    } catch (error) {
+      app.log.error({ err: error, kind }, 'could not send account mail');
+      return false;
+    }
+  };
 
   /**
    * Join the queue, tolerating a cooldown.
@@ -88,11 +135,17 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
    * how long is left -- so it must not fail the sign-in. The status returned says where they
    * stand either way.
    */
-  const requestOrReport = async (userId: string): Promise<AccessStatus> => {
+  const requestOrReport = async (user: {
+    id: string;
+    emailVerified: boolean;
+  }): Promise<AccessStatus> => {
+    // An unverified account gets no seat, so it is not put in the queue either -- holding a place
+    // in a line it cannot reach the front of would be a worse experience than being told why.
+    if (requireVerifiedEmail && !user.emailVerified) return store.access.status(user.id);
     try {
-      return await store.access.request(userId);
+      return await store.access.request(user.id);
     } catch (error) {
-      if (error instanceof CooldownError) return store.access.status(userId);
+      if (error instanceof CooldownError) return store.access.status(user.id);
       throw error;
     }
   };
@@ -164,10 +217,12 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
       const user = await store.register(email, password, displayName ?? '');
       const session = await store.createSession(user.id);
       setSessionCookie(request, reply, session.token);
+
+      const mailSent = requireVerifiedEmail ? await sendLink(user.id, user.email, 'verify') : true;
       // Signed in immediately: making someone log in again right after registering is friction
       // with no security benefit. Registration is free and unlimited -- it is the *seat* that is
       // rationed -- so a new account goes straight into the queue like any other.
-      return reply.status(201).send({ user, access: await requestOrReport(user.id) });
+      return reply.status(201).send({ user, access: await requestOrReport(user), mailSent });
     } catch (error) {
       return sendAccountError(reply, error);
     }
@@ -200,7 +255,7 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
       await loginByAccount.reset(email.trim().toLowerCase());
       // Signing in is what puts someone in the queue: there is no separate button to press, and
       // no state where they are signed in and have not asked for a seat.
-      return reply.send({ user, access: await requestOrReport(user.id) });
+      return reply.send({ user, access: await requestOrReport(user) });
     } catch (error) {
       return sendAccountError(reply, error);
     }
@@ -226,6 +281,125 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
     return reply.send({ ok: true });
   });
 
+  // --- Email verification -------------------------------------------------------------------------
+
+  /**
+   * Spend a verification link.
+   *
+   * A GET, because it is reached by clicking a link in a mail client, and it works without a
+   * session: the link may well be opened in a different browser from the one that signed up, and
+   * the token is the proof, not the cookie.
+   *
+   * It answers with JSON here and the app turns it into a screen; the route the browser lands on
+   * is served by the SPA, which calls this.
+   */
+  app.post<{ Body: { token?: string } }>('/auth/verify', async (request, reply) => {
+    const token = request.body?.token;
+    if (!token) return reply.status(400).send({ error: 'Missing token.' });
+
+    try {
+      const { userId } = await consumeEmailToken(pool, token, 'verify');
+      await store.markEmailVerified(userId);
+      const user = await store.findUser(userId);
+
+      // Signed in on the spot when the link is opened in the browser that already holds the
+      // session, and simply verified when it is not. Either way the next thing they see is the
+      // app rather than a form.
+      const current = await currentUser(request);
+      return reply.send({
+        ok: true,
+        user,
+        access: user && current?.id === user.id ? await requestOrReport(user) : null,
+      });
+    } catch (error) {
+      if (error instanceof TokenError) {
+        return reply.status(400).send({ error: verifyFailureMessage(error.failure) });
+      }
+      throw error;
+    }
+  });
+
+  /** Send another verification link. Signed in, because it is asking about your own address. */
+  app.post('/auth/resend-verification', async (request, reply) => {
+    const user = await requireUser(request, reply);
+    if (!user) return reply;
+    if (user.emailVerified) return reply.send({ ok: true, alreadyVerified: true });
+
+    const [byAccount, byAddress] = await Promise.all([
+      mailByAccount.check(user.id),
+      mailByAddress.check(request.ip),
+    ]);
+    if (!byAccount.allowed || !byAddress.allowed) {
+      const retryAfter = Math.max(byAccount.retryAfter, byAddress.retryAfter);
+      return reply
+        .status(429)
+        .header('Retry-After', retryAfter)
+        .send({ error: `Another link was sent recently. Try again in ${retryAfter}s.` });
+    }
+
+    return reply.send({ ok: await sendLink(user.id, user.email, 'verify') });
+  });
+
+  // --- Password reset -----------------------------------------------------------------------------
+
+  /**
+   * Ask for a reset link.
+   *
+   * Always answers the same way, whether or not the address is registered. Saying "no such
+   * account" here turns this endpoint into a way to find out who has one.
+   */
+  app.post<{ Body: { email?: string } }>('/auth/forgot-password', async (request, reply) => {
+    const email = request.body?.email;
+    const answer = {
+      ok: true,
+      message: 'If that address has an account, a reset link is on its way.',
+    };
+    if (!email) return reply.send(answer);
+
+    const byAddress = await mailByAddress.check(request.ip);
+    if (!byAddress.allowed) {
+      return reply
+        .status(429)
+        .header('Retry-After', byAddress.retryAfter)
+        .send({ error: `Too many requests. Try again in ${byAddress.retryAfter}s.` });
+    }
+
+    const user = await store.findUserByEmail(email);
+    if (user && (await mailByAccount.check(user.id)).allowed) {
+      await sendLink(user.id, user.email, 'reset');
+    }
+    return reply.send(answer);
+  });
+
+  app.post<{ Body: { token?: string; password?: string } }>(
+    '/auth/reset-password',
+    async (request, reply) => {
+      const { token, password } = request.body ?? {};
+      if (!token || !password) {
+        return reply.status(400).send({ error: 'A token and a new password are required.' });
+      }
+
+      try {
+        const { userId, email } = await consumeEmailToken(pool, token, 'reset');
+        // Strength is checked inside, and a weak one throws before anything is written.
+        await store.setPassword(userId, password);
+
+        // Reaching the mailbox proves the address as surely as a verification link does, so an
+        // account that resets its password without having verified is verified by doing it.
+        await store.markEmailVerified(userId);
+
+        // Every session was destroyed by the reset, including this one if it was the same browser.
+        reply.clearCookie(SESSION_COOKIE, { path: '/' });
+        return reply.send({ ok: true, email });
+      } catch (error) {
+        if (error instanceof TokenError) {
+          return reply.status(400).send({ error: resetFailureMessage(error.failure) });
+        }
+        return sendAccountError(reply, error);
+      }
+    },
+  );
+
   // --- Access ------------------------------------------------------------------------------------
 
   app.get('/access', async (request, reply) => {
@@ -237,6 +411,13 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
   app.post('/access', async (request, reply) => {
     const user = await requireUser(request, reply);
     if (!user) return reply;
+
+    if (requireVerifiedEmail && !user.emailVerified) {
+      return reply.status(403).send({
+        error: 'Confirm your email address before taking a seat.',
+        access: await store.access.status(user.id),
+      });
+    }
 
     try {
       return reply.send({ access: await store.access.request(user.id) });
@@ -343,4 +524,37 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
       return sendAccountError(reply, error);
     }
   });
+}
+
+
+/**
+ * Why a link did not work, in words.
+ *
+ * Each failure gets its own message because each has a different next step, and "invalid token"
+ * for all four leaves someone with nothing to do about it.
+ */
+function verifyFailureMessage(failure: string): string {
+  switch (failure) {
+    case 'expired':
+      return 'That link has expired. Sign in and ask for another.';
+    case 'used':
+      return 'That link has already been used. Your address is confirmed -- just sign in.';
+    case 'address-changed':
+      return 'That link was sent to a different address than the account now uses.';
+    default:
+      return 'That link is not valid. Sign in and ask for another.';
+  }
+}
+
+function resetFailureMessage(failure: string): string {
+  switch (failure) {
+    case 'expired':
+      return 'That reset link has expired. Reset links last an hour -- ask for another.';
+    case 'used':
+      return 'That reset link has already been used. Ask for another if you still need one.';
+    case 'address-changed':
+      return 'That link was sent to a different address than the account now uses.';
+    default:
+      return 'That reset link is not valid. Ask for another.';
+  }
 }

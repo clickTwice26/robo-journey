@@ -25,6 +25,16 @@ export {
 export type { ProjectSummary, PublicUser, StoredProject } from './store.js';
 
 export {
+  RESET_TOKEN_TTL_MS,
+  TokenError,
+  VERIFY_TOKEN_TTL_MS,
+  consumeEmailToken,
+  issueEmailToken,
+  pruneEmailTokens,
+} from './email-tokens.js';
+export type { ConsumedToken, EmailTokenKind, IssuedToken, TokenFailure } from './email-tokens.js';
+
+export {
   ACCESS_CAPACITY,
   ACCESS_MAX_COOLDOWN_MS,
   ACCESS_MIN_COOLDOWN_MS,

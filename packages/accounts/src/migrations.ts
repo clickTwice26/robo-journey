@@ -103,6 +103,33 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE access ADD COLUMN cooldown_from TIMESTAMPTZ;
     `,
   },
+  {
+    id: 4,
+    name: 'email-verification',
+    sql: `
+      -- Null means unverified. A boolean would answer "is it verified"; a timestamp also answers
+      -- "since when", which is the question asked when an account turns out to be a problem.
+      ALTER TABLE users ADD COLUMN email_verified_at TIMESTAMPTZ;
+
+      CREATE TYPE email_token_kind AS ENUM ('verify', 'reset');
+
+      CREATE TABLE email_tokens (
+        token_hash TEXT PRIMARY KEY,
+        user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind       email_token_kind NOT NULL,
+        -- The address the token was issued for. A token stops working if the account's address
+        -- changes afterwards, so a link sent to an old mailbox cannot verify a new one.
+        email      TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at TIMESTAMPTZ NOT NULL,
+        -- Single use. Recorded rather than deleted so a second click can say "already used"
+        -- instead of the same message an invented token gets.
+        used_at    TIMESTAMPTZ
+      );
+      CREATE INDEX email_tokens_user ON email_tokens (user_id, kind);
+      CREATE INDEX email_tokens_expires ON email_tokens (expires_at);
+    `,
+  },
 ];
 
 /** Bring the schema up to date. Safe to run concurrently from any number of instances. */

@@ -6,6 +6,7 @@
  */
 import { createServer, type ServerParts } from '../src/server.js';
 import { loadConfig, type Config } from '../src/config.js';
+import { createCaptureMailer, type Mailer } from '../src/mailer.js';
 import { migrate } from '@robo-journey/accounts';
 import { createBackends, hasDatabase, type TestBackends } from '../../../test/database.js';
 
@@ -15,7 +16,18 @@ export interface TestServer extends ServerParts {
   /** Simulated time, so an hour-long session does not take an hour. */
   readonly clock: { now: number };
   readonly backends: TestBackends;
+  /** What the server tried to send. Asserting on a log line would test the log format. */
+  readonly mailer: Mailer & { sent: Message[] };
+  /** The token out of the most recent link of a kind, which is what a person would click. */
+  linkToken(kind: 'verify' | 'reset'): string | null;
   destroy(): Promise<void>;
+}
+
+export interface Message {
+  readonly to: string;
+  readonly subject: string;
+  readonly text: string;
+  readonly html: string;
 }
 
 export interface TestServerOptions {
@@ -23,6 +35,8 @@ export interface TestServerOptions {
   readonly sessionMinutes?: number;
   readonly cooldownMinutes?: number;
   readonly idleMinutes?: number;
+  /** Off by default so the suites that predate verification are unaffected by it. */
+  readonly requireVerifiedEmail?: boolean;
 }
 
 /**
@@ -41,6 +55,8 @@ function testConfig(backends: TestBackends, options: TestServerOptions): Config 
     RJ_ACCESS_SESSION_MINUTES: String(options.sessionMinutes ?? 60),
     RJ_ACCESS_COOLDOWN_MINUTES: String(options.cooldownMinutes ?? 20),
     RJ_ACCESS_IDLE_MINUTES: String(options.idleMinutes ?? 2),
+    RJ_REQUIRE_VERIFIED_EMAIL: options.requireVerifiedEmail ? 'true' : 'false',
+    RJ_PUBLIC_URL: 'https://studio.example.test',
   } as NodeJS.ProcessEnv);
 }
 
@@ -54,10 +70,12 @@ export async function startTestServer(
   await migrate(backends.pool);
 
   const clock = { now: Date.UTC(2026, 0, 1, 12, 0, 0) };
+  const mailer = createCaptureMailer() as Mailer & { sent: Message[] };
   const parts = await createServer({
     config: testConfig(backends, options),
     pool: backends.pool,
     redis: backends.redis,
+    mailer,
     access: { now: () => clock.now },
   });
 
@@ -65,6 +83,15 @@ export async function startTestServer(
     ...parts,
     clock,
     backends,
+    mailer,
+    linkToken(kind) {
+      const path = kind === 'verify' ? '/verify' : '/reset-password';
+      for (const message of [...mailer.sent].reverse()) {
+        const url = new RegExp(`https?://\\S*${path}\\?token=([^\\s"<]+)`).exec(message.text);
+        if (url) return decodeURIComponent(url[1]!);
+      }
+      return null;
+    },
     async destroy() {
       // The pool and the client belong to the harness, so the server is told to let go of them
       // rather than closing them underneath it.

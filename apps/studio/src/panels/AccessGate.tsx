@@ -31,12 +31,21 @@ import {
   Typography,
 } from '@mui/material';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import MarkEmailUnreadIcon from '@mui/icons-material/MarkEmailUnread';
 import { Tooltip } from '@mui/material';
 import GroupsIcon from '@mui/icons-material/Groups';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import { useCallback, useEffect, useState } from 'react';
-import { AuthError, login, register, type AccessStatus } from '../auth.ts';
+import {
+  AuthError,
+  login,
+  register,
+  requestPasswordReset,
+  resetPassword,
+  verifyEmail,
+  type AccessStatus,
+} from '../auth.ts';
 import type { AccessGate as Gate } from '../useAccess.ts';
 
 /** Mirrors the server's minimum, so the hint appears before a round trip rejects it. */
@@ -115,10 +124,12 @@ function SignIn({ gate }: { gate: Gate }) {
   const [displayName, setDisplayName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const submit = useCallback(async () => {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const session =
         mode === 'login'
@@ -182,6 +193,7 @@ function SignIn({ gate }: { gate: Gate }) {
         />
 
         {error && <Alert severity="error">{error}</Alert>}
+        {notice && <Alert severity="info">{notice}</Alert>}
 
         <Button type="submit" variant="contained" disabled={busy} fullWidth>
           {busy ? <CircularProgress size={20} /> : mode === 'login' ? 'Sign in' : 'Create account'}
@@ -198,11 +210,31 @@ function SignIn({ gate }: { gate: Gate }) {
           onClick={() => {
             setMode(mode === 'login' ? 'register' : 'login');
             setError(null);
+            setNotice(null);
           }}
         >
           {mode === 'login' ? 'Create one — it is free' : 'Sign in'}
         </Link>
       </Typography>
+
+      {mode === 'login' && (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          <Link
+            component="button"
+            type="button"
+            onClick={() => {
+              setError(null);
+              // Answers identically whether or not the address is registered, so there is nothing
+              // to branch on here and nothing to learn from it about who has an account.
+              void requestPasswordReset(email).then(setNotice).catch(() => {
+                setNotice('If that address has an account, a reset link is on its way.');
+              });
+            }}
+          >
+            Forgotten your password?
+          </Link>
+        </Typography>
+      )}
 
       <Rules />
     </Shell>
@@ -389,6 +421,67 @@ function Idle({ gate }: { gate: Gate }) {
   );
 }
 
+/**
+ * Signed in, address not yet proved.
+ *
+ * The one screen where doing nothing is the right move -- the link is in their inbox, not here --
+ * so it says so plainly and offers exactly two things: send another, or use a different address by
+ * signing out. Anything else would suggest there is something to do on this page.
+ */
+function Unverified({ gate }: { gate: Gate }) {
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <Shell>
+      <Stack spacing={2} sx={{ py: 1, alignItems: 'center' }}>
+        <MarkEmailUnreadIcon color="primary" sx={{ fontSize: 36 }} />
+        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+          Confirm your address
+        </Typography>
+        <Typography variant="body2" color="text.secondary" align="center">
+          We sent a link to <strong>{gate.user?.email}</strong>. Open it and you are in — this page
+          will notice on its own.
+        </Typography>
+        <Typography variant="caption" color="text.secondary" align="center">
+          Confirming is what keeps the queue fair. Accounts are free, so without it anyone wanting a
+          permanent seat would simply make ten of them.
+        </Typography>
+
+        {gate.error && (
+          <Alert severity="warning" sx={{ width: '100%' }}>
+            {gate.error}
+          </Alert>
+        )}
+        {sent && !gate.error && (
+          <Alert severity="success" sx={{ width: '100%' }}>
+            Another link is on its way. It can take a minute — check spam if it does not appear.
+          </Alert>
+        )}
+
+        <Button
+          variant="outlined"
+          fullWidth
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            void gate
+              .resend()
+              .then(() => setSent(true))
+              .finally(() => setBusy(false));
+          }}
+        >
+          {busy ? <CircularProgress size={20} /> : 'Send it again'}
+        </Button>
+
+        <Button size="small" color="inherit" onClick={() => void gate.signOut()}>
+          Use a different address
+        </Button>
+      </Stack>
+    </Shell>
+  );
+}
+
 function Unreachable({ gate }: { gate: Gate }) {
   return (
     <Shell>
@@ -406,6 +499,209 @@ function Unreachable({ gate }: { gate: Gate }) {
 
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * Where a verification link lands.
+ *
+ * Spends the token once, on mount, and then rewrites the URL to drop it. Without that, a refresh
+ * replays a token that has already been used and the person is told their perfectly good link is
+ * invalid -- and a spent token sitting in the address bar is a secret in browser history for no
+ * reason.
+ */
+export function VerifyLanding({
+  gate,
+  token,
+  onDone,
+}: {
+  gate: Gate;
+  token: string | null;
+  onDone(): void;
+}) {
+  const [state, setState] = useState<'working' | 'done' | 'failed'>('working');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    if (!token) {
+      setState('failed');
+      setMessage('That link is missing its token. Try opening it from the email again.');
+      return;
+    }
+
+    let cancelled = false;
+    void verifyEmail(token)
+      .then((session) => {
+        if (cancelled) return;
+        setState('done');
+        if (session.user) gate.adopt(session.user, session.access);
+        // Long enough to read, short enough not to be a wait. Then out of the way: leaving the
+        // landing on screen would strand a confirmed account on a page with nothing to do.
+        setTimeout(() => {
+          if (!cancelled) onDone();
+        }, 1200);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setState('failed');
+        setMessage(error instanceof AuthError ? error.message : (error as Error).message);
+      })
+      .finally(() => {
+        window.history.replaceState(null, '', '/');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // Deliberately once: spending the token is not something to redo when the gate object changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  return (
+    <Shell>
+      <Stack spacing={2} sx={{ py: 1, alignItems: 'center' }}>
+        {state === 'working' && <CircularProgress />}
+        {state === 'done' && (
+          <>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+              Address confirmed
+            </Typography>
+            <Typography variant="body2" color="text.secondary" align="center">
+              That is everything. Taking you in…
+            </Typography>
+          </>
+        )}
+        {state === 'failed' && (
+          <>
+            <Alert severity="error" sx={{ width: '100%' }}>
+              {message}
+            </Alert>
+            <Button
+              variant="outlined"
+              fullWidth
+              onClick={() => {
+                onDone();
+                void gate.refresh();
+              }}
+            >
+              Continue
+            </Button>
+          </>
+        )}
+      </Stack>
+    </Shell>
+  );
+}
+
+/** Where a password-reset link lands: choose a new one, then sign in with it. */
+export function ResetLanding({
+  gate,
+  token,
+  onDone,
+}: {
+  gate: Gate;
+  token: string | null;
+  onDone(): void;
+}) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const submit = useCallback(async () => {
+    if (!token) {
+      setError('That link is missing its token. Try opening it from the email again.');
+      return;
+    }
+    // Checked here as well as on the server, because being told the two do not match after a round
+    // trip that also spent the token would leave nothing to try again with.
+    if (password !== confirm) {
+      setError('Those two do not match.');
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      await resetPassword(token, password);
+      setPassword('');
+      setConfirm('');
+      setDone(true);
+      window.history.replaceState(null, '', '/');
+      await gate.refresh();
+    } catch (caught) {
+      setError(caught instanceof AuthError ? caught.message : (caught as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }, [confirm, gate, password, token]);
+
+  if (done) {
+    return (
+      <Shell>
+        <Alert severity="success">
+          Password changed, and every other session has been signed out. Sign in with the new one.
+        </Alert>
+        <Button
+          variant="contained"
+          fullWidth
+          sx={{ mt: 2 }}
+          onClick={() => {
+            onDone();
+            void gate.refresh();
+          }}
+        >
+          Sign in
+        </Button>
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell>
+      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
+        Choose a new password
+      </Typography>
+      <Stack
+        spacing={2}
+        component="form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+      >
+        <TextField
+          label="New password"
+          size="small"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          autoComplete="new-password"
+          helperText={`At least ${MIN_PASSWORD_LENGTH} characters.`}
+          autoFocus
+          required
+          fullWidth
+        />
+        <TextField
+          label="Again"
+          size="small"
+          type="password"
+          value={confirm}
+          onChange={(event) => setConfirm(event.target.value)}
+          autoComplete="new-password"
+          required
+          fullWidth
+        />
+        {error && <Alert severity="error">{error}</Alert>}
+        <Button type="submit" variant="contained" disabled={busy} fullWidth>
+          {busy ? <CircularProgress size={20} /> : 'Change it'}
+        </Button>
+      </Stack>
+      <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 2 }}>
+        Changing your password signs out every session, on every device.
+      </Typography>
+    </Shell>
+  );
+}
+
 export function AccessGate({ gate }: { gate: Gate }) {
   switch (gate.phase) {
     case 'loading':
@@ -418,6 +714,8 @@ export function AccessGate({ gate }: { gate: Gate }) {
       );
     case 'unreachable':
       return <Unreachable gate={gate} />;
+    case 'unverified':
+      return <Unverified gate={gate} />;
     case 'queued':
       return <Queued gate={gate} access={gate.access!} />;
     case 'cooldown':

@@ -20,6 +20,11 @@ import { registerDatasheetRoutes } from './datasheet-route.js';
 import { registerAuthRoutes } from './auth-routes.js';
 import { createGuards } from './session-guard.js';
 import { CompileCache, createRedis, redisHealthy } from './redis.js';
+import {
+  createConsoleMailer,
+  createSmtpMailer,
+  type Mailer,
+} from './mailer.js';
 import { describeConfig, loadConfig, type Config } from './config.js';
 import {
   ArduinoCompiler,
@@ -43,6 +48,8 @@ export interface CreateServerOptions {
   /** Supplied by tests, which bring their own throwaway instances. */
   readonly pool?: Pool;
   readonly redis?: Redis;
+  /** Supplied by tests, which assert on what was sent rather than on a log line. */
+  readonly mailer?: Mailer;
   /** Overrides for the capacity policy, for tests that cannot wait an hour. */
   readonly access?: { now?: () => number };
 }
@@ -61,6 +68,21 @@ export async function createServer(options: CreateServerOptions = {}): Promise<S
     });
 
   const redis = options.redis ?? createRedis({ url: config.REDIS_URL, keyPrefix: config.RJ_REDIS_PREFIX });
+
+  // SMTP the moment a host is configured, and printing to the log until then -- which is what
+  // makes the whole verification flow clickable on a laptop with no mail account.
+  const mailer =
+    options.mailer ??
+    (config.SMTP_HOST
+      ? createSmtpMailer({
+          host: config.SMTP_HOST,
+          port: config.SMTP_PORT,
+          secure: config.SMTP_SECURE,
+          user: config.SMTP_USER,
+          pass: config.SMTP_PASSWORD,
+          from: config.SMTP_FROM,
+        })
+      : createConsoleMailer());
 
   const app = Fastify({
     logger: { level: config.LOG_LEVEL },
@@ -102,7 +124,15 @@ export async function createServer(options: CreateServerOptions = {}): Promise<S
   await app.register(
     async (scope) => {
       await scope.register(cookie);
-      registerAuthRoutes(scope, { store, guards, redis });
+      registerAuthRoutes(scope, {
+      store,
+      guards,
+      redis,
+      pool,
+      mailer,
+      publicUrl: config.RJ_PUBLIC_URL,
+      requireVerifiedEmail: config.RJ_REQUIRE_VERIFIED_EMAIL,
+    });
       registerDatasheetRoutes(scope, { guards });
       registerCompileRoute(scope, { guards, compiler, cache });
     },
@@ -119,6 +149,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<S
     // are still open, then close them. Closing the pool first turns a graceful shutdown into a
     // burst of errors for requests that were nearly done.
     await app.close();
+    if (!options.mailer) await mailer.close?.();
     if (!options.redis) redis.disconnect();
     if (!options.pool) await pool.end();
   };

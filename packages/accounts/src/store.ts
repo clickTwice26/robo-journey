@@ -41,6 +41,14 @@ export interface PublicUser {
   readonly email: string;
   readonly displayName: string;
   readonly createdAt: string;
+  /**
+   * Whether the address has been proved.
+   *
+   * Exposed because the interface has to act on it -- an unverified account can sign in and see
+   * where it stands, and cannot take a seat. Accounts are free, so without this the per-account
+   * cooldown means nothing: anyone wanting a permanent seat registers ten accounts.
+   */
+  readonly emailVerified: boolean;
 }
 
 export interface ProjectSummary {
@@ -80,6 +88,7 @@ interface UserRow {
   email: string;
   display_name: string;
   created_at: Date;
+  email_verified_at: Date | null;
 }
 
 const toUser = (row: UserRow): PublicUser => ({
@@ -87,6 +96,7 @@ const toUser = (row: UserRow): PublicUser => ({
   email: row.email,
   displayName: row.display_name,
   createdAt: iso(row.created_at),
+  emailVerified: row.email_verified_at !== null,
 });
 
 export class AccountStore {
@@ -125,7 +135,7 @@ export class AccountStore {
       const { rows } = await this.pool.query<UserRow>(
         `INSERT INTO users (id, email, display_name, password_hash)
          VALUES ($1, $2, $3, $4)
-         RETURNING id, email, display_name, created_at`,
+         RETURNING id, email, display_name, created_at, email_verified_at`,
         [id, normalised, name, serializeHash(hash)],
       );
       return toUser(rows[0]!);
@@ -149,7 +159,8 @@ export class AccountStore {
   async authenticate(email: string, password: string): Promise<PublicUser> {
     const normalised = normaliseEmail(email);
     const { rows } = await this.pool.query<UserRow & { password_hash: string }>(
-      `SELECT id, email, display_name, password_hash, created_at FROM users WHERE lower(email) = $1`,
+      `SELECT id, email, display_name, password_hash, created_at, email_verified_at
+         FROM users WHERE lower(email) = $1`,
       [normalised],
     );
     const row = rows[0];
@@ -176,10 +187,48 @@ export class AccountStore {
 
   async findUser(id: string): Promise<PublicUser | null> {
     const { rows } = await this.pool.query<UserRow>(
-      'SELECT id, email, display_name, created_at FROM users WHERE id = $1',
+      'SELECT id, email, display_name, created_at, email_verified_at FROM users WHERE id = $1',
       [id],
     );
     return rows[0] ? toUser(rows[0]) : null;
+  }
+
+  /** Find by address, for the paths that start from one. Null rather than throwing: see below. */
+  async findUserByEmail(email: string): Promise<PublicUser | null> {
+    const { rows } = await this.pool.query<UserRow>(
+      'SELECT id, email, display_name, created_at, email_verified_at FROM users WHERE lower(email) = $1',
+      [normaliseEmail(email)],
+    );
+    return rows[0] ? toUser(rows[0]) : null;
+  }
+
+  /**
+   * Record that an address has been proved.
+   *
+   * Idempotent, and it keeps the first timestamp: clicking a link twice should not move the date
+   * an account was verified.
+   */
+  async markEmailVerified(userId: string): Promise<void> {
+    await this.pool.query(
+      'UPDATE users SET email_verified_at = COALESCE(email_verified_at, now()) WHERE id = $1::uuid',
+      [userId],
+    );
+  }
+
+  /**
+   * Set a new password.
+   *
+   * Every session goes with it. A reset means the account holder has lost control of it or thinks
+   * they have, and leaving whoever else was signed in still signed in defeats the point of
+   * resetting.
+   */
+  async setPassword(userId: string, password: string): Promise<void> {
+    const hash = await hashPassword(password);
+    await this.pool.query('UPDATE users SET password_hash = $1 WHERE id = $2::uuid', [
+      serializeHash(hash),
+      userId,
+    ]);
+    await this.destroyAllSessions(userId);
   }
 
   // --- Sessions ----------------------------------------------------------------------------------
@@ -208,7 +257,7 @@ export class AccountStore {
     if (!token) return null;
 
     const { rows } = await this.pool.query<UserRow & { expires_at: Date }>(
-      `SELECT u.id, u.email, u.display_name, u.created_at, s.expires_at
+      `SELECT u.id, u.email, u.display_name, u.created_at, u.email_verified_at, s.expires_at
          FROM sessions s JOIN users u ON u.id = s.user_id
         WHERE s.token_hash = $1 AND s.expires_at > now()`,
       [hashToken(token)],

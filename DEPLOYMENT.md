@@ -74,6 +74,47 @@ whichever request happened to need it first.
 | `RJ_TRUST_PROXY` | `false` | Turn on **only** behind something that sets `X-Forwarded-For`. Trusting it otherwise lets any client claim any address and every per-address limit becomes decorative. |
 | `RJ_DB_SSL` | `false` | Verify the server certificate. |
 | `GEMINI_API_KEY` | — | Optional. Without it datasheet extraction reports itself unavailable and everything else works. |
+| `RJ_PUBLIC_URL` | `http://localhost:28610` | Where the app is reached from. Every link in outgoing mail is built from it, so it cannot be guessed from a request — a `Host` header is attacker-controlled. Production refuses to start if this is still localhost. |
+| `RJ_REQUIRE_VERIFIED_EMAIL` | `true` | Whether an address must be confirmed before an account can take a seat. |
+| `SMTP_HOST` | — | Unset means links are printed to the log instead of sent, which is how local development works. Production refuses to start with verification on and no mail server. |
+| `SMTP_PORT` | `587` | |
+| `SMTP_SECURE` | inferred | `true` on port 465, `false` elsewhere. Set it only to override. On STARTTLS ports the code requires the upgrade, so credentials are never sent in the clear either way. |
+| `SMTP_USER` / `SMTP_PASSWORD` | — | |
+| `SMTP_FROM` | `robo-journey <no-reply@localhost>` | |
+
+## Email
+
+Confirming an address is what makes the queue mean anything. Accounts are free, so a per-account
+cooldown is only a limit if an account costs something to make — and a mailbox is that cost.
+Without it, anyone wanting a permanent seat registers ten accounts.
+
+Credentials go in `.env` at the repository root. It is gitignored, and nothing from it is baked
+into an image; Compose passes the values to the service at run time.
+
+```bash
+RJ_PUBLIC_URL=https://yourdomain.com
+SMTP_HOST=smtp.yourprovider.com
+SMTP_PORT=587
+SMTP_USER=...
+SMTP_PASSWORD=...
+SMTP_FROM=robo-journey <no-reply@yourdomain.com>
+```
+
+**Without a mail server it still works.** Links are printed to the service log instead of sent, so
+the whole flow is clickable on a laptop:
+
+```bash
+docker compose logs -f service | grep '\[mail\]'
+```
+
+That is a development mode, not a fallback: in production the service refuses to start with
+verification switched on and no mail server, because a deployment that demands confirmation and
+cannot send it is one nobody can ever get into.
+
+Password reset uses the same machinery. Reset links last an hour against a verification link's
+day, can be spent once, supersede any earlier one, and signing a new password in destroys every
+session on every device — a reset means the account holder has lost control, and leaving whoever
+else was signed in still signed in would defeat the point.
 
 ## Scaling out
 

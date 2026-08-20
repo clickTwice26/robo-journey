@@ -408,6 +408,100 @@ export function MenuBar({
     ],
   );
 
+  /**
+   * ⚠️ The account menu is pulled OUT of the row and rendered on the right edge.
+   * A person's own name is not a peer of File / Edit / View — it is the identity
+   * this window is acting as, which is why every editor puts it opposite the
+   * menus rather than in them. It keeps its dropdown; only its position moves.
+   */
+  const leftMenus = useMemo(() => menus.filter((menu) => menu.id !== 'account'), [menus]);
+  const accountMenu = useMemo(() => menus.find((menu) => menu.id === 'account'), [menus]);
+
+  /**
+   * One menu-bar title and its dropdown.
+   *
+   * ⚠️ Extracted so the account menu can sit on the RIGHT edge while sharing this
+   * exact behaviour. The hover-to-switch, the anchor bookkeeping and the
+   * pointer-events dance below are subtle enough that a second hand-written copy
+   * for one menu would drift the first time any of it was touched.
+   */
+  const renderMenu = (menu: (typeof menus)[number], align: 'left' | 'right' = 'left') => (
+    <Box key={menu.id}>
+      <Button
+        size="small"
+        color="inherit"
+        data-menubar-title={menu.id}
+        ref={(element) => {
+          anchors.current[menu.id] = element;
+        }}
+        onClick={() => setOpenMenu((current) => (current === menu.id ? null : menu.id))}
+        // Hovering another title while a menu is open switches to it, the way a real menu bar
+        // behaves -- clicking each one is a needless extra step.
+        onMouseEnter={() => setOpenMenu((current) => (current ? menu.id : current))}
+        sx={{
+          minWidth: 0,
+          px: 1,
+          py: 0.25,
+          fontWeight: 400,
+          bgcolor: openMenu === menu.id ? 'action.selected' : 'transparent',
+        }}
+      >
+        {menu.label}
+      </Button>
+
+      <Menu
+        anchorEl={anchors.current[menu.id]}
+        open={openMenu === menu.id}
+        onClose={close}
+        anchorOrigin={{ vertical: 'bottom', horizontal: align }}
+        transformOrigin={{ vertical: 'top', horizontal: align }}
+        // MUI menus are modal, and the backdrop sits above the menu bar -- so clicking or
+        // hovering another title while one is open only dismisses it, which is not how a
+        // menu bar behaves. Letting pointer events through the root (but not the paper)
+        // restores click-to-switch and hover-to-switch; a window listener takes over the
+        // click-away duty the backdrop was doing.
+        hideBackdrop
+        disableScrollLock
+        slotProps={{
+          root: { sx: { pointerEvents: 'none' } },
+          paper: { sx: { pointerEvents: 'auto' } },
+          list: { dense: true, sx: { minWidth: 260, maxWidth: 420 } },
+        }}
+      >
+        {menu.items.map((item, index) =>
+          'divider' in item && item.divider ? (
+            <Divider key={`d${index}`} sx={{ my: 0.5 }} />
+          ) : (
+            <MenuItem
+              key={item.label}
+              disabled={'disabled' in item ? item.disabled : false}
+              onClick={() => {
+                close();
+                item.onClick?.();
+              }}
+            >
+              {'icon' in item && item.icon && <ListItemIcon>{item.icon}</ListItemIcon>}
+              <ListItemText
+                inset={!('icon' in item && item.icon)}
+                primary={item.label}
+                secondary={'secondary' in item ? item.secondary : undefined}
+                slotProps={{
+                  primary: { variant: 'body2' },
+                  secondary: { variant: 'caption', sx: { whiteSpace: 'normal' } },
+                }}
+              />
+              {'hint' in item && item.hint && (
+                <Typography variant="caption" color="text.secondary" sx={{ ml: 2 }}>
+                  {item.hint}
+                </Typography>
+              )}
+            </MenuItem>
+          ),
+        )}
+      </Menu>
+    </Box>
+  );
+
   return (
     <AppBar position="static" color="transparent" sx={{ borderBottom: 1, borderColor: 'divider' }}>
       {/* Row one: identity and menus. */}
@@ -419,82 +513,7 @@ export function MenuBar({
           robo-journey
         </Typography>
 
-        {menus.map((menu) => (
-          <Box key={menu.id}>
-            <Button
-              size="small"
-              color="inherit"
-              data-menubar-title={menu.id}
-              ref={(element) => {
-                anchors.current[menu.id] = element;
-              }}
-              onClick={() => setOpenMenu((current) => (current === menu.id ? null : menu.id))}
-              // Hovering another title while a menu is open switches to it, the way a real menu bar
-              // behaves -- clicking each one is a needless extra step.
-              onMouseEnter={() => setOpenMenu((current) => (current ? menu.id : current))}
-              sx={{
-                minWidth: 0,
-                px: 1,
-                py: 0.25,
-                fontWeight: 400,
-                bgcolor: openMenu === menu.id ? 'action.selected' : 'transparent',
-              }}
-            >
-              {menu.label}
-            </Button>
-
-            <Menu
-              anchorEl={anchors.current[menu.id]}
-              open={openMenu === menu.id}
-              onClose={close}
-              anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-              transformOrigin={{ vertical: 'top', horizontal: 'left' }}
-              // MUI menus are modal, and the backdrop sits above the menu bar -- so clicking or
-              // hovering another title while one is open only dismisses it, which is not how a
-              // menu bar behaves. Letting pointer events through the root (but not the paper)
-              // restores click-to-switch and hover-to-switch; a window listener takes over the
-              // click-away duty the backdrop was doing.
-              hideBackdrop
-              disableScrollLock
-              slotProps={{
-                root: { sx: { pointerEvents: 'none' } },
-                paper: { sx: { pointerEvents: 'auto' } },
-                list: { dense: true, sx: { minWidth: 260, maxWidth: 420 } },
-              }}
-            >
-              {menu.items.map((item, index) =>
-                'divider' in item && item.divider ? (
-                  <Divider key={`d${index}`} sx={{ my: 0.5 }} />
-                ) : (
-                  <MenuItem
-                    key={item.label}
-                    disabled={'disabled' in item ? item.disabled : false}
-                    onClick={() => {
-                      close();
-                      item.onClick?.();
-                    }}
-                  >
-                    {'icon' in item && item.icon && <ListItemIcon>{item.icon}</ListItemIcon>}
-                    <ListItemText
-                      inset={!('icon' in item && item.icon)}
-                      primary={item.label}
-                      secondary={'secondary' in item ? item.secondary : undefined}
-                      slotProps={{
-                        primary: { variant: 'body2' },
-                        secondary: { variant: 'caption', sx: { whiteSpace: 'normal' } },
-                      }}
-                    />
-                    {'hint' in item && item.hint && (
-                      <Typography variant="caption" color="text.secondary" sx={{ ml: 2 }}>
-                        {item.hint}
-                      </Typography>
-                    )}
-                  </MenuItem>
-                ),
-              )}
-            </Menu>
-          </Box>
-        ))}
+        {leftMenus.map((menu) => renderMenu(menu))}
 
         <Box sx={{ flex: 1 }} />
 
@@ -508,6 +527,13 @@ export function MenuBar({
         <Typography variant="caption" color="text.secondary" noWrap sx={{ maxWidth: 220, ml: 1 }}>
           {project.name}
         </Typography>
+
+        {/*
+          The signed-in account, at the far right. Right-aligned dropdown so it
+          opens inward instead of off the edge of the window.
+        */}
+        <Divider orientation="vertical" flexItem sx={{ mx: 1, my: 0.5 }} />
+        {accountMenu && renderMenu(accountMenu, 'right')}
       </Toolbar>
 
       <Divider />

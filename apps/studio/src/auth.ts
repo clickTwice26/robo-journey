@@ -11,6 +11,8 @@ export interface User {
   readonly email: string;
   readonly displayName: string;
   readonly createdAt: string;
+  /** Until this is true the account can sign in but cannot take a seat. */
+  readonly emailVerified: boolean;
 }
 
 /**
@@ -34,6 +36,8 @@ export interface AccessStatus {
 export interface Session {
   readonly user: User | null;
   readonly access: AccessStatus | null;
+  /** False when the verification mail could not be sent, so the screen can offer a resend. */
+  readonly mailSent?: boolean;
 }
 
 export interface ProjectSummary {
@@ -133,6 +137,41 @@ export async function login(email: string, password: string): Promise<Session> {
   return call<Session>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
+  });
+}
+
+// --- Email verification ---------------------------------------------------------------------------
+
+/** Spend a verification link. Works without a session: the token is the proof, not the cookie. */
+export async function verifyEmail(token: string): Promise<Session> {
+  return call<Session>('/auth/verify', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function resendVerification(): Promise<void> {
+  await call('/auth/resend-verification', { method: 'POST' });
+}
+
+/**
+ * Ask for a reset link.
+ *
+ * The answer is the same whether or not the address is registered, so there is nothing here to
+ * branch on -- and nothing for anyone to learn from it about who has an account.
+ */
+export async function requestPasswordReset(email: string): Promise<string> {
+  const { message } = await call<{ message: string }>('/auth/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+  return message;
+}
+
+export async function resetPassword(token: string, password: string): Promise<void> {
+  await call('/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ token, password }),
   });
 }
 

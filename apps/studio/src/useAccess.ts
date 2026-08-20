@@ -18,6 +18,7 @@ import {
   heartbeat,
   logout as logoutRequest,
   requestAccess,
+  resendVerification,
   type AccessStatus,
   type User,
 } from './auth.ts';
@@ -48,6 +49,8 @@ export type AccessPhase =
   /** The account service is not answering, so nothing can be checked. */
   | 'unreachable'
   | 'signed-out'
+  /** Signed in, but the address has not been proved yet, so no seat can be taken. */
+  | 'unverified'
   /** Signed in with no seat and no cooldown -- can ask for one. */
   | 'idle'
   | 'queued'
@@ -74,10 +77,16 @@ export interface AccessGate {
   signOut(): Promise<void>;
   /** Re-check everything, for the retry button. */
   refresh(): Promise<void>;
+  /** Send another confirmation link. */
+  resend(): Promise<void>;
 }
 
 function phaseOf(user: User | null, access: AccessStatus | null): AccessPhase {
   if (!user) return 'signed-out';
+  // Checked before the access state, because an unverified account has no meaningful one: it is
+  // never queued and never seated, and reporting it as merely 'idle' would offer a button that
+  // cannot work.
+  if (!user.emailVerified) return 'unverified';
   if (!access) return 'idle';
   return access.state;
 }
@@ -143,6 +152,15 @@ export function useAccess(): AccessGate {
       await refresh();
     }
   }, [refresh, user]);
+
+  const resend = useCallback(async () => {
+    try {
+      await resendVerification();
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof AuthError ? caught.message : (caught as Error).message);
+    }
+  }, []);
 
   const signOut = useCallback(async () => {
     try {
@@ -220,5 +238,6 @@ export function useAccess(): AccessGate {
     join,
     signOut,
     refresh,
+    resend,
   };
 }
