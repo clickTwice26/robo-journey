@@ -25,7 +25,9 @@ export type FaultCode =
   | 'supply-over-current'
   | 'led-over-current'
   | 'floating-input'
-  | 'over-voltage';
+  | 'over-voltage'
+  | 'i2c-no-pullup'
+  | 'i2c-address-clash';
 
 export function fault(
   code: FaultCode,

@@ -141,3 +141,8 @@ export { UsartTxLine } from './mcu/usart-tx.js';
 export { decode, disassemble, indexByAddress } from './debug/disassemble.js';
 export type { DisasmLine, DisassembleOptions } from './debug/disassemble.js';
 export { DATA_SPACE, IO_SPACE, dataName, ioName } from './debug/io-registers.js';
+
+// --- Buses --------------------------------------------------------------------------------------
+
+export { I2cBus, RegisterFilePeripheral } from './bus/i2c.js';
+export type { I2cPeripheral, I2cTransfer, RegisterSpec, TwiHost } from './bus/i2c.js';

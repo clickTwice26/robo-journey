@@ -22,6 +22,7 @@ import {
 } from '../mcu/pin-model.js';
 import { type Fault, fault, formatCurrent, formatVoltage } from '../faults/index.js';
 import { SignalRecorder } from '../instruments/recorder.js';
+import { I2cBus } from '../bus/i2c.js';
 
 export interface BoardOptions extends Atmega328pOptions {
   /** Supply voltage. 5 V for a classic Uno, 3.3 V for a 3V3 board. */
@@ -88,6 +89,15 @@ export class Board {
    * `watchAnalog`, because they store a sample per solve and would fill the buffer in seconds.
    */
   readonly recorder: SignalRecorder;
+
+  /**
+   * The I2C bus, wired to the MCU's TWI peripheral.
+   *
+   * avr8js drives the master side; anything a manifest attaches here plays a slave. The bus is
+   * created whether or not anything is on it, so a sketch scanning for devices gets honest
+   * not-acknowledged answers rather than a crash.
+   */
+  readonly i2c: I2cBus;
   /**
    * Faults that have occurred at any point since reset, keyed by code and subject.
    *
@@ -128,6 +138,9 @@ export class Board {
         label: location.label,
       });
     }
+
+    this.i2c = new I2cBus(this.mcu.twi);
+    this.mcu.twi.eventHandler = this.i2c;
 
     this.mcu.onPinChange(() => {
       this.pinsDirty = true;
@@ -348,6 +361,7 @@ export class Board {
     this.latchedFaults.clear();
     this.recorder.clear();
     this.mcu.usartTx.reset();
+    this.i2c.clear();
     this.stoppedAt = null;
   }
 
@@ -432,6 +446,41 @@ export class Board {
     this.recorder.sample(SUPPLY_CURRENT_CHANNEL, time, this.supplyCurrent);
   }
 
+  /**
+   * Electrical faults on the I2C bus.
+   *
+   * These cannot be seen at the protocol level, which is exactly why they are checked here. With
+   * no pull-ups the transaction still completes in simulation and on a logic analyser the bus
+   * looks dead -- the classic "my I2C device is not detected" that turns out to be two missing
+   * resistors. A2 and A3 hold SDA and SCL on an Uno; if either sits low while the bus is idle,
+   * nothing is pulling it up.
+   */
+  private detectI2cFaults(faults: Fault[], time: number, vcc: number): void {
+    if (this.i2c.addresses.length === 0) return;
+
+    for (const [label, role] of [['A4', 'SDA'], ['A5', 'SCL']] as const) {
+      const pin = this.pins.get(label);
+      if (!pin) continue;
+      // Only meaningful while the MCU is not driving the line itself.
+      if (pin.driveState !== 'input' && pin.driveState !== 'input-pullup') continue;
+
+      const voltage = this.circuit.voltage(pin.node);
+      if (voltage < 0.6 * vcc) {
+        faults.push(
+          fault(
+            'i2c-no-pullup',
+            'error',
+            `${label} (${role})`,
+            `${role} idles at ${formatVoltage(voltage)} instead of near ${formatVoltage(vcc)}. ` +
+              `I2C lines are open-drain and need pull-ups -- typically 4.7 kOhm to VCC on each. ` +
+              `Without them no device will be detected.`,
+            time,
+          ),
+        );
+      }
+    }
+  }
+
   private detectFaults(): void {
     const faults: Fault[] = [];
     const time = this.mcu.time;
@@ -468,6 +517,8 @@ export class Board {
         );
       }
     }
+
+    this.detectI2cFaults(faults, time, vcc);
 
     const supplyCurrent = this.supplyCurrent;
     if (supplyCurrent > SUPPLY_ABSOLUTE_MAX_CURRENT) {

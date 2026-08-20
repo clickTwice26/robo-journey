@@ -9,7 +9,7 @@
  * hole part, so working in real units means a resistor's legs land in adjacent holes because the
  * arithmetic says so, not because a pixel offset was tuned by hand.
  */
-import { Led, Resistor, type Device } from '@robo-journey/sim-core';
+import { Led, Resistor, type Device, type I2cPeripheral } from '@robo-journey/sim-core';
 import {
   FULL_SIZE_BREADBOARD,
   HALF_SIZE_BREADBOARD,
@@ -41,6 +41,13 @@ export interface BuildContext {
   readonly props: Record<string, unknown>;
   /** Register a device with the circuit. */
   add(device: Device): void;
+  /**
+   * Attach a peripheral to the board's I2C bus.
+   *
+   * Optional because most parts are not on a bus, and a part that needs one should fail loudly
+   * when built somewhere without it rather than silently never answering.
+   */
+  attachI2c?(peripheral: I2cPeripheral): void;
 }
 
 /**

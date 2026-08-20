@@ -10,6 +10,7 @@ import {
   Bjt,
   GROUND,
   Led,
+  RegisterFilePeripheral,
   type Device,
   type StampContext,
 } from '@robo-journey/sim-core';
@@ -470,6 +471,34 @@ export function manifestToPartDefinition(
             ),
           );
         }
+      }
+
+      // I2C peripherals answer on the bus rather than through their pins. The pin models still
+      // apply -- SDA and SCL are open-drain inputs, and that is what makes a missing pull-up
+      // detectable -- but the protocol itself runs through the bus.
+      if (manifest.behavior.kind === 'i2c-peripheral') {
+        const behavior = manifest.behavior;
+        if (!ctx.attachI2c) {
+          throw new Error(
+            `${manifest.name} is an I2C device, but this circuit has no I2C bus to attach it to.`,
+          );
+        }
+        ctx.attachI2c(
+          new RegisterFilePeripheral(
+            behavior.address,
+            behavior.registers.map((register) => ({
+              address: register.address,
+              name: register.name,
+              reset: register.reset,
+              access: register.access,
+              fromState: register.fromState,
+              scale: register.scale,
+              offset: register.offset,
+              bytes: register.bytes,
+            })),
+            (name) => state.get(name),
+          ),
+        );
       }
 
       // Transistors get a real Ebers-Moll device rather than a pin-model approximation, for the
