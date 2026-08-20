@@ -52,6 +52,13 @@ export {
   Diode,
   Inductor,
   Led,
+  MOSFET_2N7000,
+  MOSFET_IRLZ44N,
+  Mosfet,
+  OPAMP_LM358,
+  OPAMP_RAIL_TO_RAIL,
+  OpAmp,
+  Potentiometer,
   Resistor,
   Switch,
   VoltageSource,
@@ -64,6 +71,9 @@ export type {
   DiodeModel,
   IntegrationMethod,
   LedColor,
+  MosfetChannel,
+  MosfetModel,
+  OpAmpModel,
   StampContext,
 } from './analog/devices.js';
 

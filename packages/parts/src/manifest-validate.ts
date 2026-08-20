@@ -27,12 +27,21 @@ export interface ValidationResult {
 }
 
 /**
- * Largest current any single pin of a small component could plausibly carry.
+ * Currents above which something is almost certainly wrong.
  *
- * Not a datasheet number but a sanity bound: a breadboard part claiming to source 40 A has been
- * misread, most often a milliamp figure taken as amps.
+ * There is no single threshold that separates a unit error from a real power device: a 20 mA pin
+ * misread as 20 A and an IRLZ44N's genuine 47 A occupy the same range. So there are two bounds.
+ *
+ * Above `SUSPICIOUS` is worth flagging, because for the small parts most circuits use it usually
+ * is a milliamp figure taken as amps. Above `IMPLAUSIBLE` nothing that fits in a breadboard can
+ * carry it, and that is an error.
+ *
+ * The first version of this had one bound at 5 A, and it rejected a correctly extracted power
+ * MOSFET three times running -- refusing accurate data is worse than accepting suspicious data
+ * with a warning attached.
  */
-const IMPLAUSIBLE_PIN_AMPS = 5;
+const SUSPICIOUS_PIN_AMPS = 5;
+const IMPLAUSIBLE_PIN_AMPS = 200;
 /** Above this a supply figure is almost certainly millivolts read as volts, or a typo. */
 const IMPLAUSIBLE_VOLTS = 60;
 
@@ -85,7 +94,9 @@ export function validateManifest(manifest: ComponentManifest): ValidationResult 
           warn(`${at}.vNom`, `Nominal supply ${model.vNom} V is below the stated minimum ${model.vMin} V.`);
         }
         if (model.iQuiescent > IMPLAUSIBLE_PIN_AMPS) {
-          error(`${at}.iQuiescent`, `${model.iQuiescent} A quiescent is implausible. Milliamps read as amps?`);
+          error(`${at}.iQuiescent`, `${model.iQuiescent} A quiescent is implausible.`);
+        } else if (model.iQuiescent > SUSPICIOUS_PIN_AMPS) {
+          warn(`${at}.iQuiescent`, `${model.iQuiescent} A of quiescent draw is very high. Milliamps read as amps?`);
         }
         break;
       }
@@ -102,8 +113,11 @@ export function validateManifest(manifest: ComponentManifest): ValidationResult 
       }
 
       case 'digital-out': {
-        if (model.sourceMaxA > IMPLAUSIBLE_PIN_AMPS || model.sinkMaxA > IMPLAUSIBLE_PIN_AMPS) {
+        const drive = Math.max(model.sourceMaxA, model.sinkMaxA);
+        if (drive > IMPLAUSIBLE_PIN_AMPS) {
           error(`${at}.sourceMaxA`, `Drive current above ${IMPLAUSIBLE_PIN_AMPS} A is implausible for a pin.`);
+        } else if (drive > SUSPICIOUS_PIN_AMPS) {
+          warn(`${at}.sourceMaxA`, `${drive} A of drive is very high for a logic output. Milliamps read as amps?`);
         }
         if (model.openDrain && model.sourceMaxA > 0) {
           warn(`${at}.sourceMaxA`, `Open-drain outputs cannot source current; sourceMaxA is ignored.`);
@@ -144,7 +158,10 @@ export function validateManifest(manifest: ComponentManifest): ValidationResult 
   const hasGround = manifest.pins.some((p) => p.model.kind === 'ground');
   // Transistors and passives are three-terminal or two-terminal devices wired into someone else's
   // circuit; they have no supply pin of their own and demanding one would reject every one of them.
-  const isActive = !['passive', 'variable-resistor', 'transistor'].includes(manifest.behavior.kind);
+  // Discrete two- and three-terminal devices are wired into someone else's circuit and have no
+  // supply pin of their own; demanding one would reject every transistor, MOSFET and pot.
+  const isActive = !['passive', 'variable-resistor', 'transistor', 'mosfet', 'potentiometer']
+    .includes(manifest.behavior.kind);
 
   if (isActive && !hasPower) {
     error('pins', 'An active component has no power pin, so it can never be energised.');
@@ -263,6 +280,56 @@ export function validateManifest(manifest: ComponentManifest): ValidationResult 
       break;
     }
 
+    case 'mosfet': {
+      for (const key of ['drainPin', 'gatePin', 'sourcePin'] as const) {
+        requirePin(`behavior.${key}`, behavior[key], 'MOSFET');
+      }
+      if (new Set([behavior.drainPin, behavior.gatePin, behavior.sourcePin]).size !== 3) {
+        error('behavior', 'Drain, gate and source must be three different pins.');
+      }
+      if (behavior.thresholdVolts <= 0 || behavior.thresholdVolts > 20) {
+        error('behavior.thresholdVolts', `A gate threshold of ${behavior.thresholdVolts} V is outside anything real.`);
+      }
+      if (behavior.rdsOnOhms > 100) {
+        warn('behavior.rdsOnOhms', `${behavior.rdsOnOhms} ohm on-resistance is very high; ohms read as milliohms?`);
+      }
+      // Worth saying out loud, because it is the commonest MOSFET mistake in Arduino projects.
+      if (behavior.channel === 'n' && behavior.thresholdVolts > 2.5) {
+        warn(
+          'behavior.thresholdVolts',
+          `A ${behavior.thresholdVolts} V threshold means this is not a logic-level device: a 5 V ` +
+            `gate will not turn it fully on, and it will dissipate heat rather than switch cleanly.`,
+        );
+      }
+      break;
+    }
+
+    case 'op-amp': {
+      for (const key of [
+        'nonInvertingPin', 'invertingPin', 'outputPin', 'positiveRailPin', 'negativeRailPin',
+      ] as const) {
+        requirePin(`behavior.${key}`, behavior[key], 'Op-amp');
+      }
+      if (behavior.openLoopGain < 100) {
+        error('behavior.openLoopGain', `An open-loop gain of ${behavior.openLoopGain} is far too low for an op-amp.`);
+      }
+      if (behavior.headroomHighVolts < 0 || behavior.headroomLowVolts < 0) {
+        error('behavior', 'Rail headroom cannot be negative.');
+      }
+      break;
+    }
+
+    case 'potentiometer': {
+      for (const key of ['terminalAPin', 'wiperPin', 'terminalBPin'] as const) {
+        requirePin(`behavior.${key}`, behavior[key], 'Potentiometer');
+      }
+      if (new Set([behavior.terminalAPin, behavior.wiperPin, behavior.terminalBPin]).size !== 3) {
+        error('behavior', 'A potentiometer needs three distinct terminals.');
+      }
+      requireState('behavior.state', behavior.state, 'Potentiometer');
+      break;
+    }
+
     case 'threshold-switch': {
       requirePin('behavior.outputPin', behavior.outputPin, 'Threshold switch');
       requireState('behavior.state', behavior.state, 'Threshold switch');
@@ -297,8 +364,23 @@ export function validateManifest(manifest: ComponentManifest): ValidationResult 
   if (limits.vccMinVolts !== undefined && limits.vccMaxVolts !== undefined && limits.vccMinVolts > limits.vccMaxVolts) {
     error('limits', `Minimum supply exceeds maximum.`);
   }
-  if (limits.pinMaxAmps !== undefined && limits.pinMaxAmps > IMPLAUSIBLE_PIN_AMPS) {
-    error('limits.pinMaxAmps', `${limits.pinMaxAmps} A per pin is implausible. Milliamps read as amps?`);
+  if (limits.pinMaxAmps !== undefined) {
+    // The bound depends on what the part is. A power MOSFET carrying 47 A is a datasheet fact; a
+    // sensor claiming the same is a milliamp figure read as amps, and that distinction cannot be
+    // made from the number alone.
+    const isPowerDevice = ['mosfet', 'transistor'].includes(manifest.behavior.kind);
+    const ceiling = isPowerDevice ? IMPLAUSIBLE_PIN_AMPS : SUSPICIOUS_PIN_AMPS;
+
+    if (limits.pinMaxAmps > ceiling) {
+      error(
+        'limits.pinMaxAmps',
+        isPowerDevice
+          ? `${limits.pinMaxAmps} A per pin is implausible for any breadboard part.`
+          : `${limits.pinMaxAmps} A per pin is implausible for a ${manifest.category}. Milliamps read as amps?`,
+      );
+    } else if (!isPowerDevice && limits.pinMaxAmps > 1) {
+      warn('limits.pinMaxAmps', `${limits.pinMaxAmps} A per pin is high for a ${manifest.category}; worth checking.`);
+    }
   }
   if (limits.vccMaxVolts === undefined) {
     warn('limits.vccMaxVolts', 'No absolute maximum supply voltage, so over-voltage cannot be detected.');

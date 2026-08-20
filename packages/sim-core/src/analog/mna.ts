@@ -163,6 +163,57 @@ export class MnaSystem {
   }
 
   /**
+   * A voltage-controlled voltage source: `v(outA) - v(outB) = gain * (v(ctrlA) - v(ctrlB))`.
+   *
+   * Needs a branch unknown, because forcing a voltage means solving for the current that achieves
+   * it -- the same reason an independent voltage source does. This is what an op-amp is made of.
+   */
+  stampVCVS(
+    branch: number,
+    outA: number,
+    outB: number,
+    ctrlA: number,
+    ctrlB: number,
+    gain: number,
+  ): void {
+    if (branch < 0 || branch >= this.branchCount) {
+      throw new RangeError(`Branch ${branch} out of range (${this.branchCount} declared)`);
+    }
+    const n = this.size;
+    const row = this.nodeCount + branch;
+    const add = (r: number, c: number, value: number) => {
+      if (r === GROUND || c === GROUND) return;
+      this.a[r * n + c] = this.a[r * n + c]! + value;
+    };
+
+    // Incidence: the branch current flows out of outA and into outB.
+    add(outA, row, 1);
+    add(outB, row, -1);
+    // Constraint: v(outA) - v(outB) - gain * (v(ctrlA) - v(ctrlB)) = 0.
+    add(row, outA, 1);
+    add(row, outB, -1);
+    add(row, ctrlA, -gain);
+    add(row, ctrlB, gain);
+
+    this.dirty = true;
+  }
+
+  /**
+   * Add a constant to a branch's right-hand side.
+   *
+   * A controlled source that has been linearised about an operating point has a constant term as
+   * well as a gain, and it has to land on the branch's constraint row rather than on a node.
+   */
+  stampVoltageSourceOffset(branch: number, volts: number): void {
+    if (branch < 0 || branch >= this.branchCount) {
+      throw new RangeError(`Branch ${branch} out of range (${this.branchCount} declared)`);
+    }
+    const row = this.nodeCount + branch;
+    this.z[row] = this.z[row]! + volts;
+    this.dirty = true;
+  }
+
+  /**
    * A Norton pair: conductance `g` in parallel with current source `ieq`.
    *
    * This is the shape every linearised nonlinear device and every reactive companion model reduces

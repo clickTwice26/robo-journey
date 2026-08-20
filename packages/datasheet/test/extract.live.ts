@@ -25,6 +25,7 @@ import {
   Circuit,
   GROUND,
   Led,
+  Mosfet,
   Resistor,
   VoltageSource,
   digitalChannel,
@@ -100,6 +101,25 @@ DC Current Gain hFE at Ic = 2 mA, Vce = 5 V:
 Transition Frequency: 300 MHz
 
 Pin 1 = Emitter, Pin 2 = Base, Pin 3 = Collector (flat face toward you, left to right)
+`;
+
+const IRLZ44N_DATASHEET = `
+IRLZ44N HEXFET Power MOSFET
+N-Channel, Logic-Level Gate Drive
+
+Absolute Maximum Ratings
+VDSS = 55 V
+RDS(on) = 0.022 Ohm (typical, VGS = 5.0 V)
+ID = 47 A continuous drain current, VGS = 5.0 V, TC = 25 C
+Power Dissipation = 110 W
+Gate-to-Source Voltage VGS = +/- 16 V
+
+Static @ TJ = 25 C
+VGS(th)   Gate Threshold Voltage: 1.0 V min, 2.0 V max (VDS = VGS, ID = 250 uA)
+RDS(on)   Static Drain-to-Source On-Resistance: 0.022 Ohm max (VGS = 5.0 V, ID = 25 A)
+gfs       Forward Transconductance: 19 S min (VDS = 25 V, ID = 25 A)
+
+Package: TO-220AB. Pin 1 = Gate, Pin 2 = Drain, Pin 3 = Source.
 `;
 
 const firmware = (name: string): string =>
@@ -290,6 +310,57 @@ describeIfKey('extracting from a datasheet', () => {
       } finally {
         unregisterPart(manifest.id);
       }
+    },
+    120_000,
+  );
+
+  it(
+    'reads a power MOSFET, including the milliohm conversion',
+    async () => {
+      const result = await extractManifest({
+        apiKey,
+        input: { kind: 'text', text: IRLZ44N_DATASHEET },
+        hint: 'IRLZ44N logic-level N-channel MOSFET',
+      });
+
+      expect(result.error).toBeUndefined();
+      expect(result.ok).toBe(true);
+      const manifest = result.manifest!;
+      expect(validateManifest(manifest).ok).toBe(true);
+      expect(manifest.behavior.kind).toBe('mosfet');
+
+      if (manifest.behavior.kind !== 'mosfet') throw new Error('unexpected archetype');
+      const behavior = manifest.behavior;
+      expect(behavior.channel).toBe('n');
+
+      // 22 mOhm is 0.022, and getting this wrong by a thousand turns a switch that drops
+      // millivolts into one that drops volts.
+      expect(behavior.rdsOnOhms).toBeGreaterThan(0.001);
+      expect(behavior.rdsOnOhms).toBeLessThan(0.1);
+      // Logic-level: the whole reason to choose this part.
+      expect(behavior.thresholdVolts).toBeLessThan(2.5);
+
+      // And it switches: 12 V across a 10 ohm load from a 5 V gate.
+      const circuit = new Circuit();
+      const [supply, drain, gate] = circuit.addNodes(3);
+      circuit.add(new VoltageSource('VCC', supply!, GROUND, 12));
+      circuit.add(new VoltageSource('VG', gate!, GROUND, 5));
+      circuit.add(new Resistor('RL', supply!, drain!, 10));
+      const q = circuit.add(
+        new Mosfet('Q1', drain!, gate!, GROUND, behavior.channel, {
+          threshold: behavior.thresholdVolts,
+          k: behavior.k,
+          lambda: behavior.lambda,
+          rdsOn: behavior.rdsOnOhms,
+          bodyDiode: { saturationCurrent: 1e-12, emissionCoefficient: 1.5, seriesResistance: 0.01 },
+        }),
+      );
+      circuit.solve();
+
+      expect(q.region).toBe('linear');
+      expect(q.drainCurrent).toBeGreaterThan(1.1);
+      // A properly-on power MOSFET drops a fraction of a volt, not volts.
+      expect(Math.abs(q.vds)).toBeLessThan(0.5);
     },
     120_000,
   );

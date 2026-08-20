@@ -33,7 +33,7 @@ than from the peripheral that sent them.
 - [x] **M2** Konva workspace, breadboard wiring, Monaco editor, serial monitor
 - [x] **M3** Oscilloscope, logic analyser with serial decode, register inspector, disassembler, breakpoints
 - [x] **M4** Data-driven component manifests, and datasheet extraction with Gemini
-- [x] Transistors, I²C, accounts and persistence
+- [x] Transistors, MOSFETs, op-amps, potentiometers, I²C, accounts and persistence
 - [ ] **M5** Tauri desktop shell, teaching hooks
 - [ ] **M5** Tauri desktop shell, teaching hooks
 

@@ -826,3 +826,496 @@ function limitJunction(vNew: number, vOld: number, nvt: number, vCritical: numbe
   }
   return vNew;
 }
+
+// ---------------------------------------------------------------------------------------------
+// MOSFETs
+// ---------------------------------------------------------------------------------------------
+
+export type MosfetChannel = 'n' | 'p';
+
+export interface MosfetModel {
+  /** Gate threshold voltage, the datasheet's VGS(th). */
+  readonly threshold: number;
+  /**
+   * Transconductance parameter, amps per volt squared.
+   *
+   * Datasheets give a drain current at a stated VGS rather than this directly. Derive it from that
+   * point: `K = 2 * Id / (Vgs - Vth)^2`.
+   */
+  readonly k: number;
+  /** Channel-length modulation. Small; it is what gives a saturated device finite output impedance. */
+  readonly lambda: number;
+  /** On-resistance floor, the datasheet's RDS(on). Level 1 alone predicts an unrealistically low one. */
+  readonly rdsOn: number;
+  /** Body diode, which every power MOSFET has whether or not the circuit wants it. */
+  readonly bodyDiode: DiodeModel;
+}
+
+/**
+ * IRLZ44N-class logic-level N-channel MOSFET.
+ *
+ * The part people reach for to switch a motor or an LED strip from a 5 V pin, because it turns on
+ * properly at gate voltages an Arduino can actually produce.
+ */
+export const MOSFET_IRLZ44N: MosfetModel = {
+  threshold: 1.8,
+  k: 20,
+  lambda: 0.02,
+  rdsOn: 0.022,
+  bodyDiode: { saturationCurrent: 1e-12, emissionCoefficient: 1.5, seriesResistance: 0.01 },
+};
+
+/**
+ * 2N7000-class small-signal N-channel MOSFET.
+ *
+ * Not logic-level: its threshold is high enough that a 5 V gate barely turns it on, which is
+ * exactly the mistake this simulator should be able to show you.
+ */
+export const MOSFET_2N7000: MosfetModel = {
+  threshold: 2.1,
+  k: 0.5,
+  lambda: 0.02,
+  rdsOn: 1.2,
+  bodyDiode: { saturationCurrent: 1e-13, emissionCoefficient: 1.6, seriesResistance: 0.5 },
+};
+
+/**
+ * MOSFET, level 1 (Shichman-Hodges).
+ *
+ * Enough to answer the questions people actually have about a switching stage: does the gate
+ * voltage available turn it fully on, how much does it drop while conducting, and how much does it
+ * dissipate. Not enough for RF or precision analog work, which would want level 3 or BSIM -- said
+ * here so nobody assumes otherwise.
+ *
+ * The body diode is not optional. It is physically part of the device, and it is what conducts the
+ * back-EMF when a motor or relay coil is switched off -- so a simulation without it would show a
+ * flyback spike that the real part would have clamped.
+ */
+export class Mosfet implements Device {
+  readonly branchCount = 0;
+  readonly nonlinear = true;
+  branchOffset = 0;
+  internalNodeOffset = -1;
+  readonly nodes: readonly number[];
+  /** One internal node for the body diode's bulk resistance. */
+  readonly internalNodeCount = 1;
+
+  private vgsPrev = 0;
+  private vdsPrev = 0;
+  private lastId = 0;
+  private lastVgs = 0;
+  private lastVds = 0;
+
+  /** Body diode state, limited independently of the channel. */
+  private vBodyPrev = 0;
+  private readonly vBodyCritical: number;
+  private lastBodyCurrent = 0;
+
+  constructor(
+    readonly id: string,
+    private readonly drain: number,
+    private readonly gate: number,
+    private readonly source: number,
+    readonly channel: MosfetChannel = 'n',
+    readonly model: MosfetModel = MOSFET_IRLZ44N,
+  ) {
+    this.nodes = [drain, gate, source];
+    const nvt = model.bodyDiode.emissionCoefficient * VT;
+    this.vBodyCritical = nvt * Math.log(nvt / (Math.SQRT2 * model.bodyDiode.saturationCurrent));
+  }
+
+  reset(): void {
+    this.vgsPrev = 0;
+    this.vdsPrev = 0;
+    this.lastId = 0;
+    this.lastVgs = 0;
+    this.lastVds = 0;
+    this.vBodyPrev = 0;
+    this.lastBodyCurrent = 0;
+  }
+
+  /**
+   * Current through the body diode, amps.
+   *
+   * Non-zero means the device is being driven backwards -- which for a motor or relay coil is the
+   * flyback the diode is there to clamp, and for an H-bridge is usually a shoot-through bug.
+   */
+  get bodyDiodeCurrent(): number {
+    return this.lastBodyCurrent;
+  }
+
+  /** Drain current at the last converged point, amps. Positive into the drain for an N-channel. */
+  get drainCurrent(): number {
+    return this.lastId;
+  }
+
+  get vgs(): number {
+    return this.lastVgs;
+  }
+
+  get vds(): number {
+    return this.lastVds;
+  }
+
+  /** Power dissipated in the channel, watts. What decides whether it needs a heatsink. */
+  get dissipation(): number {
+    return Math.abs(this.lastId * this.lastVds);
+  }
+
+  /**
+   * Operating region.
+   *
+   * `linear` is what a switch wants -- fully on, dropping almost nothing. A device meant as a
+   * switch that reports `saturation` is being run as an amplifier, dissipating heat, which is the
+   * classic symptom of a gate that is not being driven hard enough.
+   */
+  get region(): 'cutoff' | 'linear' | 'saturation' {
+    const sign = this.channel === 'n' ? 1 : -1;
+    const overdrive = sign * this.lastVgs - this.model.threshold;
+    if (overdrive <= 0) return 'cutoff';
+    return sign * this.lastVds < overdrive ? 'linear' : 'saturation';
+  }
+
+  stamp(ctx: StampContext): void {
+    const { threshold: vth, k, lambda, rdsOn } = this.model;
+    // A P-channel is the same device with every voltage inverted.
+    const sign = this.channel === 'n' ? 1 : -1;
+
+    let vgs = sign * (ctx.voltage(this.gate) - ctx.voltage(this.source));
+    let vds = sign * (ctx.voltage(this.drain) - ctx.voltage(this.source));
+
+    // Bound how far the operating point may move per iteration. Level 1 is quadratic rather than
+    // exponential, so it needs less damping than a junction -- but an unbounded first guess on a
+    // power device still overshoots by amps.
+    const limit = 0.5;
+    if (Math.abs(vgs - this.vgsPrev) > limit) {
+      vgs = this.vgsPrev + Math.sign(vgs - this.vgsPrev) * limit;
+      ctx.requestIteration();
+    }
+    if (Math.abs(vds - this.vdsPrev) > limit) {
+      vds = this.vdsPrev + Math.sign(vds - this.vdsPrev) * limit;
+      ctx.requestIteration();
+    }
+    this.vgsPrev = vgs;
+    this.vdsPrev = vds;
+
+    const overdrive = vgs - vth;
+    let id = 0;
+    let gm = 0;
+    let gds = GMIN;
+
+    if (overdrive > 0) {
+      // Reverse conduction: a MOSFET channel is symmetric, so negative Vds simply flows the other
+      // way. Solving with |Vds| and restoring the sign keeps the model valid in both directions,
+      // which matters in an H-bridge.
+      const reverse = vds < 0;
+      const vdsMag = Math.abs(vds);
+      const modulation = 1 + lambda * vdsMag;
+
+      if (vdsMag < overdrive) {
+        // Triode: what a switch that is properly on looks like.
+        id = k * (overdrive * vdsMag - (vdsMag * vdsMag) / 2) * modulation;
+        gm = k * vdsMag * modulation;
+        gds = k * (overdrive - vdsMag) * modulation + k * (overdrive * vdsMag - (vdsMag * vdsMag) / 2) * lambda;
+      } else {
+        // Saturation: acting as a current source, and dissipating.
+        id = (k / 2) * overdrive * overdrive * modulation;
+        gm = k * overdrive * modulation;
+        gds = (k / 2) * overdrive * overdrive * lambda;
+      }
+
+      // Level 1 predicts an on-resistance far below what a real device achieves, so the datasheet's
+      // RDS(on) is imposed as a floor. Without it a simulated switch drops millivolts where the
+      // real one drops tenths of a volt, and the dissipation figure is meaningless.
+      const maxConductance = 1 / rdsOn;
+      if (gds > maxConductance) {
+        gds = maxConductance;
+        id = Math.min(id, vdsMag * maxConductance);
+      }
+
+      if (reverse) {
+        id = -id;
+        gm = -gm;
+      }
+      gds = Math.max(gds, GMIN);
+    }
+
+    const d = this.drain;
+    const g = this.gate;
+    const s = this.source;
+
+    // Channel: a transconductance from the gate plus the output conductance.
+    ctx.mna.stampVCCS(d, s, g, s, sign > 0 ? gm : -gm);
+    ctx.mna.stampConductance(d, s, gds);
+    ctx.mna.stampCurrentSource(d, s, sign * (id - gm * vgs - gds * vds));
+
+    // The gate is insulated. A large leak keeps it in the matrix rather than floating, which is
+    // also physically honest -- real gates leak nanoamps.
+    ctx.mna.stampConductance(g, s, GMIN);
+
+    this.stampBodyDiode(ctx, sign);
+
+    this.lastVgs = sign * vgs;
+    this.lastVds = sign * vds;
+    this.lastId = sign * id;
+  }
+
+  /**
+   * The intrinsic body diode, from source to drain on an N-channel.
+   *
+   * Every power MOSFET has one whether the circuit wants it or not, and it is what conducts when
+   * an inductive load is switched off. A simulation without it would show a flyback spike the real
+   * part would have clamped -- and would then not warn about the one case where it matters, an
+   * unclamped coil driven by a device that has no body diode at all.
+   */
+  private stampBodyDiode(ctx: StampContext, sign: number): void {
+    const model = this.model.bodyDiode;
+    const nvt = model.emissionCoefficient * VT;
+
+    // Anode and cathode, with the internal node carrying the diode's bulk resistance.
+    const anode = sign > 0 ? this.source : this.drain;
+    const cathode = sign > 0 ? this.drain : this.source;
+    const inner = this.internalNodeOffset;
+
+    ctx.mna.stampConductance(anode, inner, 1 / Math.max(model.seriesResistance, 1e-6));
+
+    let v = ctx.voltage(inner) - ctx.voltage(cathode);
+    if (ctx.firstIteration && this.vBodyPrev === 0) v = Math.min(v, this.vBodyCritical);
+
+    const limited = limitJunction(v, this.vBodyPrev, nvt, this.vBodyCritical);
+    if (limited !== v) ctx.requestIteration();
+    v = limited;
+    this.vBodyPrev = v;
+
+    let current: number;
+    let conductance: number;
+    if (v >= -5 * nvt) {
+      const e = Math.exp(v / nvt);
+      current = model.saturationCurrent * (e - 1);
+      conductance = (model.saturationCurrent * e) / nvt;
+    } else {
+      current = -model.saturationCurrent;
+      conductance = model.saturationCurrent / nvt;
+    }
+
+    ctx.mna.stampConductance(inner, cathode, conductance);
+    ctx.mna.stampCurrentSource(inner, cathode, current - conductance * v);
+    this.lastBodyCurrent = current;
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Op-amps
+// ---------------------------------------------------------------------------------------------
+
+export interface OpAmpModel {
+  /** Open-loop DC gain. 100 dB is 100,000, typical of a general-purpose part. */
+  readonly openLoopGain: number;
+  /** Output impedance, ohms. */
+  readonly outputImpedance: number;
+  /** Differential input impedance, ohms. */
+  readonly inputImpedance: number;
+  /**
+   * How close the output can get to each rail.
+   *
+   * The single most consequential number in practice. A classic LM358 cannot reach within about
+   * 1.5 V of its positive rail, which is why so many single-supply circuits built with one behave
+   * nothing like the textbook says. A rail-to-rail part gets within millivolts.
+   */
+  readonly headroomHigh: number;
+  readonly headroomLow: number;
+}
+
+/** LM358-class general purpose op-amp. Cannot swing near its positive rail. */
+export const OPAMP_LM358: OpAmpModel = {
+  openLoopGain: 100_000,
+  outputImpedance: 100,
+  inputImpedance: 1e9,
+  headroomHigh: 1.5,
+  headroomLow: 0.02,
+};
+
+/** MCP6002-class rail-to-rail op-amp, which does what a beginner expects an op-amp to do. */
+export const OPAMP_RAIL_TO_RAIL: OpAmpModel = {
+  openLoopGain: 112_000,
+  outputImpedance: 60,
+  inputImpedance: 1e12,
+  headroomHigh: 0.025,
+  headroomLow: 0.025,
+};
+
+/**
+ * Operational amplifier.
+ *
+ * Modelled as a saturating voltage-controlled voltage source behind an output impedance. The
+ * saturation is the point: an ideal linear op-amp would happily output forty volts from a five
+ * volt supply and every comparator circuit would appear to work perfectly, including the ones that
+ * do not.
+ *
+ * The transfer curve is `tanh`-shaped rather than a hard clamp, so it is differentiable everywhere
+ * -- Newton needs a derivative, and a hard corner at the rail makes the solver oscillate across it
+ * instead of settling.
+ */
+export class OpAmp implements Device {
+  readonly branchCount = 1;
+  readonly internalNodeCount = 1;
+  readonly nonlinear = true;
+  branchOffset = 0;
+  internalNodeOffset = -1;
+  readonly nodes: readonly number[];
+
+  private lastOutput = 0;
+  private lastDifferential = 0;
+  /** How far into the transfer curve's flat region the amplifier is, 0 to 1. */
+  private lastSaturation = 0;
+
+  constructor(
+    readonly id: string,
+    private readonly nonInverting: number,
+    private readonly inverting: number,
+    private readonly output: number,
+    /** Supply rails. The output cannot go outside them, which is the whole point. */
+    private readonly positiveRail: number,
+    private readonly negativeRail: number,
+    readonly model: OpAmpModel = OPAMP_LM358,
+  ) {
+    this.nodes = [nonInverting, inverting, output, positiveRail, negativeRail];
+  }
+
+  reset(): void {
+    this.lastOutput = 0;
+    this.lastDifferential = 0;
+    this.lastSaturation = 0;
+  }
+
+  /** Output voltage at the last converged point. */
+  get outputVoltage(): number {
+    return this.lastOutput;
+  }
+
+  /** Differential input voltage. Near zero in a working feedback loop -- the "virtual short". */
+  get differentialInput(): number {
+    return this.lastDifferential;
+  }
+
+  /**
+   * True when the amplifier has run out of swing and the feedback loop is no longer in control.
+   *
+   * Measured from the transfer curve rather than by comparing the output pin against the rail.
+   * The pin sits behind an output impedance, so any load drops it a little below what the
+   * amplifier is actually producing -- and a saturated amplifier driving a load would otherwise
+   * report itself as fine.
+   */
+  get saturated(): boolean {
+    return this.lastSaturation > 0.99;
+  }
+
+  private railHigh = 0;
+  private railLow = 0;
+
+  stamp(ctx: StampContext): void {
+    const { openLoopGain, outputImpedance, inputImpedance } = this.model;
+
+    // Inputs draw almost nothing, but must still be tied into the matrix.
+    ctx.mna.stampConductance(this.nonInverting, this.inverting, 1 / inputImpedance);
+    ctx.mna.stampConductance(this.nonInverting, GROUND, GMIN);
+    ctx.mna.stampConductance(this.inverting, GROUND, GMIN);
+
+    this.railHigh = ctx.voltage(this.positiveRail);
+    this.railLow = ctx.voltage(this.negativeRail);
+
+    const high = this.railHigh - this.model.headroomHigh;
+    const low = this.railLow + this.model.headroomLow;
+    const mid = (high + low) / 2;
+    const span = Math.max(high - low, 1e-6);
+
+    const differential = ctx.voltage(this.nonInverting) - ctx.voltage(this.inverting);
+
+    // A tanh transfer curve: linear with slope `openLoopGain` near zero, flattening smoothly into
+    // each rail. Differentiable everywhere, which a hard clamp is not.
+    const x = (2 * openLoopGain * differential) / span;
+    const tanh = Math.tanh(Math.max(-30, Math.min(30, x)));
+    const target = mid + (span / 2) * tanh;
+    // d(target)/d(differential), which collapses toward zero once saturated -- exactly the loss of
+    // loop gain that makes a saturated amplifier stop responding.
+    const gain = openLoopGain * (1 - tanh * tanh);
+
+    // The controlled source drives an internal node; the output impedance sits between that and
+    // the pin, so a loaded output sags the way a real one does.
+    const inner = this.internalNodeOffset;
+    ctx.mna.stampVCVS(this.branchOffset, inner, GROUND, this.nonInverting, this.inverting, gain);
+    // The VCVS supplies only the gain term; the constant part of the linearisation about the
+    // current operating point goes on the same constraint row.
+    ctx.mna.stampVoltageSourceOffset(this.branchOffset, target - gain * differential);
+
+    ctx.mna.stampConductance(inner, this.output, 1 / outputImpedance);
+
+    this.lastDifferential = differential;
+    this.lastOutput = ctx.voltage(this.output);
+    this.lastSaturation = Math.abs(tanh);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Three-terminal potentiometer.
+ *
+ * Not the same thing as a variable resistor, and the difference is what most beginner circuits
+ * depend on: a pot wired across a supply is a divider whose wiper sits at a fraction of it,
+ * independent of the track's total resistance. Wiring only two terminals gives a rheostat instead,
+ * whose behaviour depends entirely on what else is in the circuit.
+ */
+export class Potentiometer implements Device {
+  readonly branchCount = 0;
+  readonly internalNodeCount = 0;
+  readonly nonlinear = false;
+  branchOffset = 0;
+  internalNodeOffset = -1;
+  readonly nodes: readonly number[];
+
+  /**
+   * Smallest resistance either half may present.
+   *
+   * A wiper at an extreme would otherwise be a dead short, which is both numerically awkward and
+   * physically wrong: a real track has end resistance.
+   */
+  private static readonly MIN_SEGMENT_OHMS = 0.5;
+
+  constructor(
+    readonly id: string,
+    private readonly terminalA: number,
+    private readonly wiper: number,
+    private readonly terminalB: number,
+    public totalOhms = 10_000,
+    /** Wiper position, 0 at terminal A and 1 at terminal B. */
+    public position = 0.5,
+    /** Logarithmic ("audio") taper, as volume controls use. */
+    public taper: 'linear' | 'log' = 'linear',
+  ) {
+    if (!(totalOhms > 0)) throw new RangeError(`Potentiometer ${id}: resistance must be positive`);
+    this.nodes = [terminalA, wiper, terminalB];
+  }
+
+  /** Effective position after the taper. */
+  get effectivePosition(): number {
+    const clamped = Math.min(1, Math.max(0, this.position));
+    // An audio taper approximates a logarithmic law; this is the standard cheap approximation.
+    return this.taper === 'log' ? clamped * clamped : clamped;
+  }
+
+  /** Resistance from terminal A to the wiper. */
+  get resistanceA(): number {
+    return Math.max(Potentiometer.MIN_SEGMENT_OHMS, this.totalOhms * this.effectivePosition);
+  }
+
+  /** Resistance from the wiper to terminal B. */
+  get resistanceB(): number {
+    return Math.max(Potentiometer.MIN_SEGMENT_OHMS, this.totalOhms * (1 - this.effectivePosition));
+  }
+
+  stamp(ctx: StampContext): void {
+    ctx.mna.stampConductance(this.terminalA, this.wiper, 1 / this.resistanceA);
+    ctx.mna.stampConductance(this.wiper, this.terminalB, 1 / this.resistanceB);
+  }
+}

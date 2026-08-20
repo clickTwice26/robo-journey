@@ -22,7 +22,7 @@
  */
 
 /** Bumped whenever the prompt changes materially, and recorded in provenance. */
-export const PROMPT_VERSION = 2;
+export const PROMPT_VERSION = 3;
 
 export const SYSTEM_INSTRUCTION = `
 You extract electronic component models from datasheets for a circuit simulator that runs real
@@ -137,6 +137,33 @@ BEHAVIOR is exactly one of:
       // saturationCurrent is the transport Is, around 1e-14 for a small-signal device; the
       // datasheet will not give it, so assume 1e-14 and say so in unresolved.
       // reverseBeta is rarely quoted; 4 is a reasonable assumption.
+
+  { "kind": "mosfet", "channel": "n"|"p",
+    "drainPin": "NAME", "gatePin": "NAME", "sourcePin": "NAME",
+    "thresholdVolts": V, "k": n, "rdsOnOhms": R, "lambda": n }
+      // IRLZ44N, IRF540, 2N7000, AO3400 and the rest.
+      // thresholdVolts is VGS(th) -- use the TYPICAL figure, not the maximum.
+      // rdsOnOhms is RDS(on) at the stated gate voltage. 22 mOhm is 0.022, not 22.
+      // k is not on any datasheet. Derive it from a quoted operating point:
+      //   k = 2 * Id / (Vgs - Vth)^2   using an Id at a stated Vgs from the characteristics.
+      //   Say in unresolved which point you used.
+
+  { "kind": "op-amp",
+    "nonInvertingPin": "NAME", "invertingPin": "NAME", "outputPin": "NAME",
+    "positiveRailPin": "NAME", "negativeRailPin": "NAME",
+    "openLoopGain": n, "outputImpedanceOhms": R, "inputImpedanceOhms": R,
+    "headroomHighVolts": V, "headroomLowVolts": V }
+      // LM358, LM324, TL072, MCP6002.
+      // openLoopGain: convert dB to a ratio -- 100 dB is 100000, not 100.
+      // headroom is the difference between each supply rail and the output swing the datasheet
+      // guarantees. For an LM358 that is around 1.5 V from the positive rail; for a rail-to-rail
+      // part it is tens of millivolts. This is the number that decides whether a single-supply
+      // circuit works, so take it from the output voltage swing specification.
+
+  { "kind": "potentiometer",
+    "terminalAPin": "NAME", "wiperPin": "NAME", "terminalBPin": "NAME",
+    "totalOhms": R, "taper": "linear"|"log", "state": "stateName" }
+      // Declare a state variable from 0 to 1 for the knob position.
 `.trim();
 
 export const RULES = `
@@ -160,6 +187,9 @@ CHOOSING A BEHAVIOUR. Ask about the part, not about the list:
   Does it have MOSI/MISO/SCK/CS?                                      -> spi-peripheral
   Does one pin just go high or low when a quantity crosses a point?   -> threshold-switch
   Is it a bipolar transistor with a collector, base and emitter?      -> transistor
+  Does it have a gate, drain and source?                              -> mosfet
+  Does it have two inputs, an output, and enormous gain?              -> op-amp
+  Is it a three-terminal pot with a wiper?                            -> potentiometer
   Is it only resistors, capacitors, diodes or LEDs?                   -> passive
 If the part genuinely fits none of these, pick the closest, set confidence below 0.5, and say so in
 unresolved.

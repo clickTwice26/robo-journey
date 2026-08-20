@@ -298,6 +298,75 @@ export const BehaviorSchema = z.discriminatedUnion('kind', [
   }),
 
   /**
+   * A MOSFET.
+   *
+   * The modern switching device: every motor driver, every PWM power stage. Level 1 is enough to
+   * answer whether the available gate voltage turns it fully on and how much it dissipates, which
+   * is what people actually need to know.
+   */
+  z.object({
+    kind: z.literal('mosfet'),
+    channel: z.enum(['n', 'p']),
+    drainPin: z.string(),
+    gatePin: z.string(),
+    sourcePin: z.string(),
+    /** Gate threshold, the datasheet's VGS(th). Use the typical figure. */
+    thresholdVolts: Volts.default(2),
+    /**
+     * Transconductance parameter, A/V^2.
+     *
+     * Datasheets give a drain current at a stated VGS instead. Derive it from that point:
+     * `k = 2 * Id / (Vgs - Vth)^2`.
+     */
+    k: z.number().positive().default(1),
+    /** On-resistance, the datasheet's RDS(on). */
+    rdsOnOhms: Ohms.default(0.1),
+    /** Channel-length modulation. 0.02 is a reasonable assumption when not given. */
+    lambda: z.number().nonnegative().default(0.02),
+  }),
+
+  /**
+   * An operational amplifier.
+   *
+   * The rail headroom is the number that matters most in practice: an LM358 cannot get within
+   * about 1.5 V of its positive rail, which is why so many single-supply circuits built with one
+   * behave nothing like the textbook.
+   */
+  z.object({
+    kind: z.literal('op-amp'),
+    nonInvertingPin: z.string(),
+    invertingPin: z.string(),
+    outputPin: z.string(),
+    positiveRailPin: z.string(),
+    negativeRailPin: z.string(),
+    /** Open-loop DC gain. 100 dB is 100000. */
+    openLoopGain: z.number().positive().default(100_000),
+    outputImpedanceOhms: Ohms.default(100),
+    inputImpedanceOhms: Ohms.default(1e9),
+    /** How close the output can get to each rail, volts. */
+    headroomHighVolts: Volts.default(1.5),
+    headroomLowVolts: Volts.default(0.02),
+  }),
+
+  /**
+   * A three-terminal potentiometer.
+   *
+   * Not the same as `variable-resistor`, and the difference is what most beginner circuits depend
+   * on: a pot across a supply is a divider whose wiper sits at a fraction of it, independent of
+   * the track's total resistance.
+   */
+  z.object({
+    kind: z.literal('potentiometer'),
+    terminalAPin: z.string(),
+    wiperPin: z.string(),
+    terminalBPin: z.string(),
+    totalOhms: Ohms.default(10_000),
+    taper: z.enum(['linear', 'log']).default('linear'),
+    /** State variable driving the knob, 0 at terminal A and 1 at terminal B. */
+    state: z.string().optional(),
+  }),
+
+  /**
    * A digital output whose level follows a threshold on a state variable.
    *
    * Covers comparator modules, PIR sensors, reed switches, limit switches and tilt sensors.

@@ -10,6 +10,9 @@ import {
   Bjt,
   GROUND,
   Led,
+  Mosfet,
+  OpAmp,
+  Potentiometer,
   RegisterFilePeripheral,
   type Device,
   type StampContext,
@@ -154,9 +157,10 @@ export class ManifestDevice implements Device {
   // ---------------------------------------------------------------------------------------------
 
   stamp(ctx: StampContext): void {
-    // A transistor's terminals belong to the Bjt device; stamping generic pin models on top would
-    // hang stray impedances off the collector and base and skew every operating point.
-    if (this.manifest.behavior.kind === 'transistor') return;
+    // These devices own their terminals. Stamping generic pin models on top would hang stray
+    // impedances off a gate or an op-amp input and skew every operating point.
+    const owned = ['transistor', 'mosfet', 'op-amp', 'potentiometer'];
+    if (owned.includes(this.manifest.behavior.kind)) return;
 
     for (const pin of this.manifest.pins) this.stampPin(ctx, pin);
     this.stampBehavior(ctx);
@@ -519,6 +523,65 @@ export function manifestToPartDefinition(
               forwardEmission: 1,
               reverseEmission: 1,
             },
+          ),
+        );
+      }
+
+      if (manifest.behavior.kind === 'mosfet') {
+        const behavior = manifest.behavior;
+        ctx.add(
+          new Mosfet(
+            ctx.partId,
+            nodes.get(behavior.drainPin) ?? GROUND,
+            nodes.get(behavior.gatePin) ?? GROUND,
+            nodes.get(behavior.sourcePin) ?? GROUND,
+            behavior.channel,
+            {
+              threshold: behavior.thresholdVolts,
+              k: behavior.k,
+              lambda: behavior.lambda,
+              rdsOn: behavior.rdsOnOhms,
+              // Datasheets rarely characterise the body diode; a generic silicon junction is a
+              // defensible stand-in, and it is present because the device physically has one.
+              bodyDiode: { saturationCurrent: 1e-12, emissionCoefficient: 1.5, seriesResistance: 0.01 },
+            },
+          ),
+        );
+      }
+
+      if (manifest.behavior.kind === 'op-amp') {
+        const behavior = manifest.behavior;
+        ctx.add(
+          new OpAmp(
+            ctx.partId,
+            nodes.get(behavior.nonInvertingPin) ?? GROUND,
+            nodes.get(behavior.invertingPin) ?? GROUND,
+            nodes.get(behavior.outputPin) ?? GROUND,
+            nodes.get(behavior.positiveRailPin) ?? GROUND,
+            nodes.get(behavior.negativeRailPin) ?? GROUND,
+            {
+              openLoopGain: behavior.openLoopGain,
+              outputImpedance: behavior.outputImpedanceOhms,
+              inputImpedance: behavior.inputImpedanceOhms,
+              headroomHigh: behavior.headroomHighVolts,
+              headroomLow: behavior.headroomLowVolts,
+            },
+          ),
+        );
+      }
+
+      if (manifest.behavior.kind === 'potentiometer') {
+        const behavior = manifest.behavior;
+        const position = behavior.state ? state.get(behavior.state) : 0.5;
+        ctx.add(
+          new Potentiometer(
+            ctx.partId,
+            nodes.get(behavior.terminalAPin) ?? GROUND,
+            nodes.get(behavior.wiperPin) ?? GROUND,
+            nodes.get(behavior.terminalBPin) ?? GROUND,
+            behavior.totalOhms,
+            position,
+            behavior.taper,
           ),
         );
       }
