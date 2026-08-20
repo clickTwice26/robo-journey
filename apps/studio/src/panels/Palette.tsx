@@ -39,10 +39,11 @@ const CATEGORY_LABELS: Record<string, string> = {
   output: 'Output',
   input: 'Input',
   power: 'Power',
+  instrument: 'Instruments',
 };
 
 /** The order the device bar reads in, rather than whatever order the registry happens to hold. */
-const CATEGORY_ORDER = ['board', 'input', 'output', 'passive', 'power'];
+const CATEGORY_ORDER = ['board', 'instrument', 'input', 'output', 'passive', 'power'];
 
 /** A part matches a query on its name or its type, which is what people actually type. */
 const matches = (part: PartDefinition, query: string): boolean =>
@@ -56,7 +57,7 @@ export function PalettePanel({ sim }: { sim: SimulationController }) {
   const [query, setQuery] = useState('');
   // Boards first and open, because that is where every project starts. The rest are one click
   // away rather than a scroll away.
-  const [open, setOpen] = useState<Record<string, boolean>>({ board: true, input: true });
+  const [open, setOpen] = useState<Record<string, boolean>>({ board: true, instrument: true, input: true });
   // Bumping this re-reads the registry after a component is added at run time.
   const [generation, setGeneration] = useState(0);
 
@@ -241,6 +242,79 @@ function Inspector() {
             </MenuItem>
           ))}
         </TextField>
+      )}
+
+      {part.type === 'multimeter' && (
+        <>
+          <TextField
+            select
+            label="Dial"
+            value={String(part.props.mode ?? 'volts')}
+            onChange={(e) => updatePartProps(part.id, { mode: e.target.value })}
+            helperText="The current jack is live whatever the dial says"
+          >
+            <MenuItem value="volts">DC voltage</MenuItem>
+            <MenuItem value="amps">DC current</MenuItem>
+            <MenuItem value="ohms">Resistance</MenuItem>
+          </TextField>
+          <TextField
+            select
+            label="Current jack"
+            value={String(part.props.range ?? 'mA')}
+            onChange={(e) => updatePartProps(part.id, { range: e.target.value })}
+            helperText="mA fuses at 200 mA; A fuses at 10 A"
+          >
+            <MenuItem value="mA">mA (1 ohm shunt)</MenuItem>
+            <MenuItem value="A">A (0.01 ohm shunt)</MenuItem>
+          </TextField>
+        </>
+      )}
+
+      {part.type === 'ammeter' && (
+        <TextField
+          select
+          label="Range"
+          value={String(part.props.range ?? 'mA')}
+          onChange={(e) => updatePartProps(part.id, { range: e.target.value })}
+          helperText="Wire it in series. Across a supply, the fuse goes."
+        >
+          <MenuItem value="mA">mA (1 ohm shunt)</MenuItem>
+          <MenuItem value="A">A (0.01 ohm shunt)</MenuItem>
+        </TextField>
+      )}
+
+      {part.type === 'oscilloscope' && (
+        <>
+          <TextField
+            select
+            label="Timebase"
+            value={String(part.props.span ?? 0.05)}
+            onChange={(e) => updatePartProps(part.id, { span: Number(e.target.value) })}
+            helperText="Seconds across the whole screen"
+          >
+            {[0.001, 0.005, 0.02, 0.05, 0.2, 1, 2].map((seconds) => (
+              <MenuItem key={seconds} value={String(seconds)}>
+                {seconds >= 1 ? `${seconds} s` : `${seconds * 1000} ms`}
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            select
+            label="Volts per division"
+            value={String(part.props.voltsPerDiv ?? 1)}
+            onChange={(e) => updatePartProps(part.id, { voltsPerDiv: Number(e.target.value) })}
+          >
+            {[0.1, 0.2, 0.5, 1, 2, 5].map((volts) => (
+              <MenuItem key={volts} value={String(volts)}>
+                {volts} V
+              </MenuItem>
+            ))}
+          </TextField>
+          <Typography variant="caption" color="text.secondary">
+            Run the GND clip to circuit ground. Without it the probes have nothing to measure
+            against and the traces float, exactly as they would on the bench.
+          </Typography>
+        </>
       )}
 
       {part.type === 'pushbutton' && (

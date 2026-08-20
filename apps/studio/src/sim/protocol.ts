@@ -30,12 +30,48 @@ export interface SimSnapshot {
    * nothing to the frame.
    */
   readonly readouts: Record<string, readonly DeviceReadout[]>;
+  /**
+   * What each oscilloscope on the canvas is showing, by part id.
+   *
+   * Decimated in the worker to the handful of points a screen a few centimetres wide can draw. The
+   * scope panel asks for full-resolution traces separately; this is only what goes on the
+   * instrument's own face, and sending thousands of points per frame for that would be waste.
+   */
+  readonly scopes: Record<string, ScopeFrame>;
   /** Anything written to Serial since the last poll. Cleared on read. */
   readonly serial: string;
   /** Problems reported while building the circuit, e.g. an unknown part. */
   readonly problems: readonly string[];
   /** Byte address execution is stopped at, when a breakpoint stopped it. */
   readonly stoppedAt: number | null;
+}
+
+/** One channel's worth of what a scope on the canvas is displaying. */
+export interface ScopeTrace {
+  /** Channel name, CH1 to CH4. */
+  readonly pin: string;
+  /**
+   * Sample times, seconds since reset, oldest first.
+   *
+   * Carried rather than assumed even, because they are not: the solver steps in nanoseconds across
+   * an edge and in milliseconds when nothing is happening. Drawing the samples evenly spaced would
+   * stretch one edge across a quarter of the screen and squeeze a quiet second into a pixel --
+   * which is precisely backwards for the signals anyone points a scope at.
+   */
+  readonly times: number[];
+  /** Volts, aligned with `times`. Empty when the channel has captured nothing yet. */
+  readonly values: number[];
+  /** Latest reading, for the legend. */
+  readonly volts: number;
+}
+
+export interface ScopeFrame {
+  /** Seconds across the screen. */
+  readonly span: number;
+  /** Time at the left and right edges of the screen, seconds since reset. */
+  readonly from: number;
+  readonly to: number;
+  readonly traces: readonly ScopeTrace[];
 }
 
 export const EMPTY_SNAPSHOT: SimSnapshot = {
@@ -47,6 +83,7 @@ export const EMPTY_SNAPSHOT: SimSnapshot = {
   voltages: {},
   brightness: {},
   readouts: {},
+  scopes: {},
   faults: [],
   serial: '',
   problems: [],

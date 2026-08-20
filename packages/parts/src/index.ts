@@ -43,6 +43,8 @@ export type { PartInstance, Project, SketchFile, Wire } from './project.js';
 
 export { BUILTIN_MANIFESTS, installBuiltinManifests } from './builtin-manifests.js';
 
+export { INSTRUMENTS, SCOPE_CHANNELS, parseProbeChannel, probeChannel } from './instruments.js';
+
 export { EXAMPLES, exampleById } from './examples.js';
 export type { Example } from './examples.js';
 

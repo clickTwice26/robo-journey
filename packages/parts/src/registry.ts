@@ -9,18 +9,26 @@
  * hole part, so working in real units means a resistor's legs land in adjacent holes because the
  * arithmetic says so, not because a pixel offset was tuned by hand.
  */
-import { Led, Resistor, type Device, type I2cPeripheral, type SpiPeripheral } from '@robo-journey/sim-core';
+import {
+  Led,
+  Resistor,
+  type ChannelSpec,
+  type Device,
+  type I2cPeripheral,
+  type SpiPeripheral,
+} from '@robo-journey/sim-core';
 import {
   FULL_SIZE_BREADBOARD,
   HALF_SIZE_BREADBOARD,
   MINI_BREADBOARD,
   type BreadboardSpec,
 } from '@robo-journey/sim-core';
+import { INSTRUMENTS } from './instruments.js';
 
 /** Standard breadboard and header pitch: 0.1 inch. */
 export const PITCH_MM = 2.54;
 
-export type PartCategory = 'board' | 'passive' | 'output' | 'input' | 'power';
+export type PartCategory = 'board' | 'passive' | 'output' | 'input' | 'power' | 'instrument';
 
 export interface PartPin {
   /** Pin name, which becomes the terminal id suffix. */
@@ -55,6 +63,14 @@ export interface BuildContext {
    * answers is decided by a voltage on a wire, so the bus has to be told which wire.
    */
   attachSpi?(peripheral: SpiPeripheral, csNode: number, csActiveLow: boolean): void;
+  /**
+   * Record a channel for an instrument probe.
+   *
+   * Optional in the same way the buses are: a part that wants to record should still build without
+   * a recorder, because a headless test has no scope screen to draw on and the measurement is
+   * still valid.
+   */
+  watchProbe?(spec: ChannelSpec, read: () => number): void;
 }
 
 /**
@@ -98,6 +114,13 @@ export interface PartDefinition {
    * device. Returning pairs rather than mutating a netlist keeps this declarative.
    */
   readonly internalSpec?: BreadboardSpec;
+  /**
+   * Properties that change how the part is *displayed* and not what it does electrically.
+   *
+   * A scope's timebase is the example: turning it redraws the screen, and rebuilding the circuit
+   * to apply it would throw away the capture you were trying to look at.
+   */
+  readonly displayProps?: readonly string[];
   /** Contribute devices. Omitted for parts that are pure connectivity. */
   build?(ctx: BuildContext): void;
   /** Present on parts without bespoke artwork, telling the canvas how to draw a generic body. */
@@ -290,6 +313,7 @@ const DEFINITIONS: readonly PartDefinition[] = [
   RESISTOR,
   LED,
   PUSHBUTTON,
+  ...INSTRUMENTS,
 ];
 
 const BY_TYPE = new Map(DEFINITIONS.map((d) => [d.type, d]));

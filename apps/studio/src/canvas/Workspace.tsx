@@ -24,6 +24,7 @@ import {
   terminalPositions,
   type Point,
 } from './geometry.ts';
+import { AmmeterShape, MultimeterShape, OscilloscopeShape } from './instruments.tsx';
 import {
   BreadboardShape,
   ButtonShape,
@@ -355,6 +356,17 @@ export function Workspace({ width, height, onControls, onPartContextMenu }: Prop
             part.type === 'resistor' ? <ResistorShape {...common} /> :
             part.type === 'led' ? <LedShape {...common} brightness={snapshot.brightness[part.id] ?? 0} /> :
             part.type === 'pushbutton' ? <ButtonShape {...common} /> :
+            // Instruments carry a live face rather than a silkscreen: the reading belongs on the
+            // meter, next to the probes you ran to take it.
+            part.type === 'multimeter' ? (
+              <MultimeterShape {...common} readout={snapshot.readouts[part.id]} />
+            ) :
+            part.type === 'ammeter' ? (
+              <AmmeterShape {...common} readout={snapshot.readouts[part.id]} />
+            ) :
+            part.type === 'oscilloscope' ? (
+              <OscilloscopeShape {...common} frame={snapshot.scopes[part.id]} />
+            ) :
             // Anything else -- every component extracted from a datasheet -- gets a generic body.
             // Falling through to null here is what made generated parts invisible, leaving only
             // their pin hit-targets on the canvas.

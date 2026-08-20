@@ -23,6 +23,9 @@ import {
   buildCircuit,
   installBuiltinManifests,
   manifestToPartDefinition,
+  parseProbeChannel,
+  partDefinition,
+  probeChannel,
   registerPart,
   splitTerminal,
   type BuiltCircuit,
@@ -38,6 +41,8 @@ import {
   type DecodedFrame,
   type McuState,
   type RegisterValue,
+  type ScopeFrame,
+  type ScopeTrace,
   type SimApi,
   type SimSnapshot,
   type TraceData,
@@ -165,23 +170,41 @@ class Simulation implements SimApi {
 
   reset(): void {
     this.pause();
+    // Reset is the moment you get to replace the fuses, which is the only way to get a meter back
+    // once its fuse has gone -- the same trip to the drawer it would be in real life.
+    this.blownFuses.clear();
     this.rebuild();
   }
 
   setPartProp(partId: string, key: string, value: unknown): void {
     if (!this.project) return;
+    const part = this.project.parts.find((p) => p.id === partId);
+
     this.project = {
       ...this.project,
       parts: this.project.parts.map((p) =>
         p.id === partId ? { ...p, props: { ...p.props, [key]: value } } : p,
       ),
     };
-    // Rebuilding is the honest way to apply a property change: a resistance or a switch position
-    // alters the circuit's stamps, and patching a live device would leave the netlist stale.
-    // Preserve the MCU's progress so pressing a button does not restart the sketch.
+
+    // Some properties change only how a part is displayed. A scope's timebase is the case that
+    // matters: rebuilding to apply it would clear the very capture you turned the knob to look at.
+    if (part && this.isDisplayProp(part.type, key)) return;
+
+    // Otherwise rebuilding is the honest way to apply the change: a resistance or a switch
+    // position alters the circuit's stamps, and patching a live device would leave the netlist
+    // stale. Preserve the MCU's progress so pressing a button does not restart the sketch.
     const cycles = this.built?.board.mcu.cycles ?? 0;
     this.rebuild();
     if (this.built && cycles > 0) this.built.board.runFor(0);
+  }
+
+  private isDisplayProp(partType: string, key: string): boolean {
+    try {
+      return partDefinition(partType).displayProps?.includes(key) ?? false;
+    } catch {
+      return false;
+    }
   }
 
   snapshot(): SimSnapshot {
@@ -206,12 +229,14 @@ class Simulation implements SimApi {
       const values = device.readout?.();
       if (values && values.length > 0) readouts[partId] = values;
       if (device instanceof Led) brightness[partId] = device.brightness;
+      if ((device as { blown?: boolean }).blown === true) this.blownFuses.add(partId);
     }
 
     const serial = this.serialBuffer;
     this.serialBuffer = '';
 
     return {
+      scopes: this.scopeFrames(),
       running: this.running,
       time: board.time,
       cycles: board.mcu.cycles,
@@ -225,6 +250,78 @@ class Simulation implements SimApi {
       problems: [...problems, ...this.runtimeProblems],
       stoppedAt: board.stoppedAtBreakpoint,
     };
+  }
+
+  /**
+   * Points per scope channel sent with every snapshot.
+   *
+   * Sized for the instrument's own screen, which is a few hundred pixels wide at most. The scope
+   * *panel* asks for full resolution through `traces`; this is the face of the thing on the canvas
+   * and it does not need more.
+   */
+  private static readonly SCREEN_POINTS = 160;
+
+  /**
+   * What each oscilloscope is showing right now.
+   *
+   * The recorder's own channel list is the source of truth for which scopes exist -- the id
+   * carries the part it came from -- so nothing has to be kept in step with the project separately.
+   */
+  private scopeFrames(): Record<string, ScopeFrame> {
+    const board = this.built?.board;
+    if (!board) return {};
+
+    const byPart = new Map<string, string[]>();
+    for (const id of board.recorder.channelIds) {
+      const probe = parseProbeChannel(id);
+      if (!probe) continue;
+      const pins = byPart.get(probe.partId) ?? [];
+      pins.push(probe.pin);
+      byPart.set(probe.partId, pins);
+    }
+    if (byPart.size === 0) return {};
+
+    const now = board.time;
+    const frames: Record<string, ScopeFrame> = {};
+
+    for (const [partId, pins] of byPart) {
+      const part = this.project?.parts.find((p) => p.id === partId);
+      const span = Number(part?.props?.span ?? 0.05) || 0.05;
+      const from = Math.max(0, now - span);
+      const traces: ScopeTrace[] = [];
+
+      for (const pin of pins.sort()) {
+        // A probe clipped to nothing is not measuring zero volts, it is not measuring. The channel
+        // still records -- its input sits at ground through its own megohm -- but drawing that as
+        // a flat trace would put a line across the screen for every unused input, and those lines
+        // sit exactly on top of the ones you are trying to look at.
+        if (!this.isProbeConnected(partId, pin)) {
+          traces.push({ pin, times: [], values: [], volts: 0 });
+          continue;
+        }
+
+        const window = board.recorder.window(
+          probeChannel(partId, pin),
+          from,
+          now,
+          Simulation.SCREEN_POINTS,
+        );
+        traces.push({
+          pin,
+          times: window ? Array.from(window.times) : [],
+          values: window ? Array.from(window.values) : [],
+          volts: board.recorder.latest(probeChannel(partId, pin)),
+        });
+      }
+      frames[partId] = { span, from, to: now, traces };
+    }
+    return frames;
+  }
+
+  /** Whether a wire runs to this probe at all. */
+  private isProbeConnected(partId: string, pin: string): boolean {
+    const terminal = `${partId}:${pin}`;
+    return this.project?.wires.some((w) => w.from === terminal || w.to === terminal) ?? false;
   }
 
   channels(): ChannelSpec[] {
@@ -327,6 +424,27 @@ class Simulation implements SimApi {
 
   // -------------------------------------------------------------------------------------------
 
+  /**
+   * Meters whose fuse has gone, so it stays gone.
+   *
+   * Every property change rebuilds the circuit, which builds fresh devices. Without this, blowing
+   * a meter's fuse and then turning the dial would quietly repair it -- and blowing one is a
+   * consequence worth keeping until someone resets.
+   */
+  private readonly blownFuses = new Set<string>();
+
+  private withBlownFuses(project: Project): Project {
+    if (this.blownFuses.size === 0) return project;
+    return {
+      ...project,
+      parts: project.parts.map((part) =>
+        this.blownFuses.has(part.id)
+          ? { ...part, props: { ...part.props, fuseBlown: true } }
+          : part,
+      ),
+    };
+  }
+
   private rebuild(): void {
     const previousBreakpoints = this.built?.board.breakpoints ?? [];
     this.detachSerial?.();
@@ -342,7 +460,7 @@ class Simulation implements SimApi {
     this.runtimeProblems = [];
     const progMem = loadHex(this.hex);
     this.progMem = progMem;
-    this.built = buildCircuit(this.project, { progMem });
+    this.built = buildCircuit(this.withBlownFuses(this.project), { progMem });
 
     // A circuit edit rebuilds the board, but breakpoints belong to the firmware and must persist
     // -- losing them every time a wire moves would make the debugger useless while wiring.

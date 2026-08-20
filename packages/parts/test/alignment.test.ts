@@ -51,6 +51,15 @@ function parseHole(name: string): { column: number; row: BreadboardRow } | null 
   return { column: Number(match[1]), row: match[2] as BreadboardRow };
 }
 
+/**
+ * Categories whose connection to a breadboard is a wire rather than a leg.
+ *
+ * Boards and instruments both sit next to the breadboard and reach into it, so their pins are
+ * meant to be nowhere near the hole they are wired to.
+ */
+const reachesByLead = (category: string): boolean =>
+  category === 'board' || category === 'instrument';
+
 describe.each(EXAMPLES.map((e) => [e.name, e] as const))('%s', (_name, example) => {
   const project: Project = example.build();
 
@@ -83,7 +92,9 @@ describe.each(EXAMPLES.map((e) => [e.name, e] as const))('%s', (_name, example) 
         if (!otherPart || !otherDefinition) continue;
         // Only through-hole parts sit *in* holes. Anything in the `board` category -- an Uno, a
         // second breadboard -- reaches a hole by jumper wire, and its pin is meant to be far away.
-        if (otherDefinition.category === 'board') continue;
+        // Instruments are the same case for a different reason: a probe is a lead you run to a
+        // point, so a meter wired to a hole is measuring it, not plugged into it.
+        if (reachesByLead(otherDefinition.category)) continue;
 
         const pinSpec = otherDefinition.pins.find((p) => p.name === otherPin);
         if (!pinSpec) continue;
@@ -108,7 +119,10 @@ describe.each(EXAMPLES.map((e) => [e.name, e] as const))('%s', (_name, example) 
     // carry a breadboard it does not need.
     const hasPluggableParts =
       boards.size > 0 &&
-      project.parts.some((part) => safeDefinition(part.type)?.category !== 'board');
+      project.parts.some((part) => {
+        const category = safeDefinition(part.type)?.category;
+        return category !== undefined && !reachesByLead(category);
+      });
     if (hasPluggableParts) expect(checked).toBeGreaterThan(0);
   });
 
@@ -124,7 +138,7 @@ describe.each(EXAMPLES.map((e) => [e.name, e] as const))('%s', (_name, example) 
       for (const other of project.parts) {
         const otherDefinition = safeDefinition(other.type);
         // Same reasoning: only parts that physically sit on the board must fit within it.
-        if (!otherDefinition || otherDefinition.category === 'board') continue;
+        if (!otherDefinition || reachesByLead(otherDefinition.category)) continue;
         const pluggedIn = project.wires.some(
           (w) =>
             (w.from.startsWith(`${other.id}:`) && w.to.startsWith(`${part.id}:`)) ||

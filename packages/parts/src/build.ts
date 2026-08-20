@@ -174,6 +174,7 @@ export function buildCircuit(project: Project, options: BuildOptions): BuiltCirc
         attachI2c: (peripheral) => board.i2c.attach(peripheral),
         attachSpi: (peripheral, csNode, csActiveLow) =>
           board.spi.attach({ peripheral, csNode, csActiveLow }),
+        watchProbe: (spec, read) => board.watchProbe(spec, read),
       });
     } catch (error) {
       problems.push(`Could not build ${part.id}: ${(error as Error).message}`);

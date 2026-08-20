@@ -213,7 +213,48 @@ const SERIAL: Example = {
     }),
 };
 
-export const EXAMPLES: readonly Example[] = [BLINK, NO_RESISTOR, BUTTON, SERIAL];
+/**
+ * The instruments, on a circuit worth pointing them at.
+ *
+ * A divider is the right first thing to measure because you can work out the answer in your head
+ * and then see whether the meter agrees -- and because the junction of two resistors is exactly the
+ * kind of node no Arduino pin reaches, which is the reason the meter is a part with probes.
+ */
+const PROBING: Example = {
+  id: 'probing',
+  name: 'Probe a divider',
+  description: 'A multimeter across a 1k/1k divider and a scope on D13. Wire the probes anywhere.',
+  build: () =>
+    parseProject({
+      version: 1,
+      name: 'Probe a divider',
+      parts: [
+        { id: 'uno1', type: 'arduino-uno', x: 12.7, y: 0 },
+        { id: 'bb1', type: 'breadboard-mini', x: 0, y: BB_Y },
+        { id: 'r1', type: 'resistor', x: colX(5), y: rowY('B'), props: { ohms: 1000 } },
+        { id: 'r2', type: 'resistor', x: colX(9), y: rowY('C'), props: { ohms: 1000 } },
+        { id: 'dmm1', type: 'multimeter', x: 0, y: 100, props: { mode: 'volts' } },
+        { id: 'scope1', type: 'oscilloscope', x: 0, y: 152, props: { span: 2, voltsPerDiv: 1, offsetVolts: 2.5 } },
+      ],
+      wires: [
+        { id: 'w1', from: 'uno1:5V', to: 'bb1:5A', color: '#d84a4a' },
+        { id: 'w2', from: 'r1:a', to: 'bb1:5B' },
+        { id: 'w3', from: 'r1:b', to: 'bb1:9B' },
+        { id: 'w4', from: 'r2:a', to: 'bb1:9C' },
+        { id: 'w5', from: 'r2:b', to: 'bb1:13C' },
+        { id: 'w6', from: 'bb1:13A', to: 'uno1:GND', color: '#2c3e50' },
+        // The measurement the board itself cannot take: the junction, halfway down the divider.
+        { id: 'w7', from: 'dmm1:V', to: 'bb1:9A', color: '#d84a4a' },
+        { id: 'w8', from: 'dmm1:COM', to: 'bb1:13B', color: '#2c3e50' },
+        // The scope's ground clip is a real wire. Without it the trace has no reference.
+        { id: 'w9', from: 'scope1:CH1', to: 'uno1:D13', color: '#f5d442' },
+        { id: 'w10', from: 'scope1:GND', to: 'uno1:GND2', color: '#3ecf8e' },
+      ],
+      sketch: BLINK.build().sketch,
+    }),
+};
+
+export const EXAMPLES: readonly Example[] = [BLINK, NO_RESISTOR, BUTTON, SERIAL, PROBING];
 
 export function exampleById(id: string): Example | undefined {
   return EXAMPLES.find((e) => e.id === id);

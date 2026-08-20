@@ -141,6 +141,21 @@ export type {
   RecorderOptions,
 } from './instruments/recorder.js';
 
+export {
+  Ammeter,
+  Multimeter,
+  ScopeChannel,
+  VOLTMETER_OHMS,
+  formatReading,
+} from './instruments/meters.js';
+export type {
+  AmmeterOptions,
+  CurrentRange,
+  MeterMode,
+  MultimeterOptions,
+  ScopeChannelOptions,
+} from './instruments/meters.js';
+
 export { decodeUart, framesToText, levelAt } from './instruments/decode.js';
 export type { UartFrame, UartOptions } from './instruments/decode.js';
 

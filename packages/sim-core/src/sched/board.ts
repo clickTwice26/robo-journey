@@ -21,7 +21,7 @@ import {
   SUPPLY_ABSOLUTE_MAX_CURRENT,
 } from '../mcu/pin-model.js';
 import { type Fault, fault, formatCurrent, formatVoltage } from '../faults/index.js';
-import { SignalRecorder } from '../instruments/recorder.js';
+import { SignalRecorder, type ChannelSpec } from '../instruments/recorder.js';
 import { I2cBus } from '../bus/i2c.js';
 import { SpiBus } from '../bus/spi.js';
 
@@ -90,6 +90,13 @@ export class Board {
    * `watchAnalog`, because they store a sample per solve and would fill the buffer in seconds.
    */
   readonly recorder: SignalRecorder;
+  /**
+   * Channels contributed by instruments in the circuit, with the reader that supplies each.
+   *
+   * Structural rather than stateful: they survive a reset, because the scope is still plugged in
+   * after you press reset and its traces should start again rather than disappear.
+   */
+  private readonly probes: { id: string; read: () => number }[] = [];
 
   /**
    * The I2C bus, wired to the MCU's TWI peripheral.
@@ -364,6 +371,19 @@ export class Board {
     });
   }
 
+  /**
+   * Record a channel an instrument supplies rather than a header pin.
+   *
+   * A scope placed on the canvas has its probes on nets the board knows nothing about -- a
+   * breadboard row, the junction of two resistors -- so it hands back a reader instead of a pin
+   * name. Sampled on the same solve boundary as everything else, which is what keeps an edge
+   * captured by a probe aligned with the same edge captured on a pin.
+   */
+  watchProbe(spec: ChannelSpec, read: () => number): void {
+    this.recorder.addChannel(spec);
+    this.probes.push({ id: spec.id, read });
+  }
+
   /** Start recording total supply current. */
   watchSupplyCurrent(): void {
     this.recorder.addChannel({
@@ -472,6 +492,8 @@ export class Board {
     }
 
     this.recorder.sample(SUPPLY_CURRENT_CHANNEL, time, this.supplyCurrent);
+
+    for (const probe of this.probes) this.recorder.sample(probe.id, time, probe.read());
   }
 
   /**
