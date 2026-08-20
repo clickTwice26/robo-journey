@@ -8,30 +8,66 @@ body,
 
 /*
  * dockview is styled by CSS variables rather than by the MUI theme, so both palettes are stated
- * here and selected by the `data-theme` the app puts on the root element. The dark set is the
- * default so there is no flash of the wrong chrome before the script runs.
+ * here and selected by the `data-theme` the app stamps on the root element before it renders.
+ *
+ * The full set, not a few. dockview names a tab by *two* things at once -- whether its group has
+ * focus and whether its panel is the visible one -- so there are four tab states, and overriding
+ * only the visible ones leaves every unselected tab painted in the theme's own dark defaults. That
+ * is exactly what a half-themed tab strip looks like.
  */
 .dockview-theme-abyss {
-  --dv-background-color: #14161a;
+  height: 100%;
+
   --dv-group-view-background-color: #1b1e24;
   --dv-tabs-and-actions-container-background-color: #14161a;
+
   --dv-activegroup-visiblepanel-tab-background-color: #1b1e24;
-  --dv-inactivegroup-visiblepanel-tab-background-color: #14161a;
+  --dv-activegroup-visiblepanel-tab-color: #e6e9ef;
+  --dv-activegroup-hiddenpanel-tab-background-color: #14161a;
+  --dv-activegroup-hiddenpanel-tab-color: #9aa4b2;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #1b1e24;
+  --dv-inactivegroup-visiblepanel-tab-color: #9aa4b2;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #14161a;
+  --dv-inactivegroup-hiddenpanel-tab-color: #6c7685;
+
   --dv-tab-divider-color: #2a2f38;
   --dv-separator-border: #2a2f38;
   --dv-paneview-header-border-color: #2a2f38;
-  height: 100%;
+  --dv-paneview-active-outline-color: #4da3ff;
+  --dv-active-sash-color: #4da3ff;
+  --dv-icon-hover-background-color: #2a2f38;
+  --dv-context-menu-background-color: #1b1e24;
+  --dv-context-menu-color: #e6e9ef;
+  --dv-drag-over-background-color: rgba(77, 163, 255, 0.14);
+  --dv-drag-over-border-color: #4da3ff;
+  --dv-floating-titlebar-background-color: #1b1e24;
+  --dv-tabs-container-scrollbar-color: #3a414d;
 }
 
 :root[data-theme='light'] .dockview-theme-abyss {
-  --dv-background-color: #eef0f4;
   --dv-group-view-background-color: #ffffff;
   --dv-tabs-and-actions-container-background-color: #e4e7ed;
+
+  /* The selected tab is the one that reads as paper; the rest recede into the strip. */
   --dv-activegroup-visiblepanel-tab-background-color: #ffffff;
-  --dv-inactivegroup-visiblepanel-tab-background-color: #e4e7ed;
+  --dv-activegroup-visiblepanel-tab-color: #1a1d23;
+  --dv-activegroup-hiddenpanel-tab-background-color: #e4e7ed;
+  --dv-activegroup-hiddenpanel-tab-color: #5a6371;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #f6f7f9;
+  --dv-inactivegroup-visiblepanel-tab-color: #5a6371;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #e4e7ed;
+  --dv-inactivegroup-hiddenpanel-tab-color: #79818f;
+
   --dv-tab-divider-color: #d9dee6;
   --dv-separator-border: #d9dee6;
   --dv-paneview-header-border-color: #d9dee6;
-  --dv-activegroup-visiblepanel-tab-color: #1a1d23;
-  --dv-inactivegroup-visiblepanel-tab-color: #5a6371;
+  --dv-paneview-active-outline-color: #1565c0;
+  --dv-active-sash-color: #1565c0;
+  --dv-icon-hover-background-color: #d5dae2;
+  --dv-context-menu-background-color: #ffffff;
+  --dv-context-menu-color: #1a1d23;
+  --dv-drag-over-background-color: rgba(21, 101, 192, 0.12);
+  --dv-drag-over-border-color: #1565c0;
+  --dv-floating-titlebar-background-color: #e4e7ed;
+  --dv-tabs-container-scrollbar-color: #b9c0cc;
 }

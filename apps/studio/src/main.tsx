@@ -6,6 +6,7 @@ import { manifestToPartDefinition, parseManifest, validateManifest } from '@robo
 // Importing the library installs the built-in manifests into this thread's registry, so the
 // palette is populated before the first render.
 import { storedManifests } from './library.ts';
+import { storedPreference } from './useThemeMode.ts';
 import './index.css';
 
 /**
@@ -27,6 +28,20 @@ if (import.meta.env.DEV) {
     __parts: { manifestToPartDefinition, parseManifest, validateManifest, storedManifests },
   });
 }
+
+/*
+ * Stamp the theme before anything renders.
+ *
+ * dockview's chrome is chosen by this attribute in CSS, and React sets it from an effect -- which
+ * runs after the first paint. Doing it here as well means a light user never sees a frame of dark
+ * panel chrome on the way in.
+ */
+document.documentElement.dataset.theme =
+  storedPreference() === 'system'
+    ? window.matchMedia?.('(prefers-color-scheme: light)').matches
+      ? 'light'
+      : 'dark'
+    : storedPreference();
 
 const container = document.getElementById('root');
 if (!container) throw new Error('Missing #root');
