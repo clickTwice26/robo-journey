@@ -23,6 +23,7 @@ import RemoveIcon from '@mui/icons-material/Remove';
 import FitScreenIcon from '@mui/icons-material/FitScreen';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlineOutlined';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
+import Rotate90DegreesCwIcon from '@mui/icons-material/Rotate90DegreesCw';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Workspace, type CanvasControls } from '../canvas/Workspace.tsx';
 import { useStudio } from '../store.ts';
@@ -62,6 +63,13 @@ export function WorkspacePanel() {
     [],
   );
 
+  /** A quarter turn on the spot. Wires follow, because they are drawn from the terminal map. */
+  const rotate = useCallback((partId: string) => {
+    const state = useStudio.getState();
+    const part = state.project.parts.find((p) => p.id === partId);
+    if (part) state.rotatePart(partId, part.rotation + 90);
+  }, []);
+
   /** Detach a part without deleting it: legs come out of the holes, the part stays on the canvas. */
   const unplug = useCallback((partId: string) => {
     const state = useStudio.getState();
@@ -89,6 +97,19 @@ export function WorkspacePanel() {
         anchorReference="anchorPosition"
         anchorPosition={menu ? { top: menu.y, left: menu.x } : undefined}
       >
+        {/* First, because turning a part is the thing you do most often to one and the only one of
+            these three that is not destructive. */}
+        <MenuItem
+          onClick={() => {
+            if (menu) rotate(menu.partId);
+            setMenu(null);
+          }}
+        >
+          <ListItemIcon>
+            <Rotate90DegreesCwIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary="Rotate 90°" secondary="Or press R with it selected" />
+        </MenuItem>
         <MenuItem
           onClick={() => {
             if (menu) unplug(menu.partId);

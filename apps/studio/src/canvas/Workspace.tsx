@@ -406,10 +406,14 @@ export function Workspace({ width, height, onControls, onPartContextMenu }: Prop
             <Group
               key={part.id}
               draggable={draggable}
-              x={mm(part.x)}
-              y={mm(part.y)}
-              // About the part's origin, which is where `terminalPositions` rotates its pins too.
-              // The two agreeing is what keeps a wire attached to a leg after a part is turned.
+              // Positioned by its middle and offset back by half itself, which is how Konva is
+              // told to turn a shape about its centre. `terminalPositions` uses the same centre,
+              // and the two agreeing is what keeps a wire attached to a leg after a part is
+              // turned. The drag handler undoes the half-offset to get the corner back.
+              x={mm(part.x) + mm(definition?.width ?? 0) / 2}
+              y={mm(part.y) + mm(definition?.height ?? 0) / 2}
+              offsetX={mm(definition?.width ?? 0) / 2}
+              offsetY={mm(definition?.height ?? 0) / 2}
               rotation={part.rotation}
               onClick={(e) => {
                 e.cancelBubble = true;
@@ -426,7 +430,13 @@ export function Workspace({ width, height, onControls, onPartContextMenu }: Prop
                 });
               }}
               onDragEnd={(e) => {
-                handleDragEnd(part.id, e.target.x() / PX_PER_MM, e.target.y() / PX_PER_MM);
+                // The group's position is its centre, so the corner -- which is what the project
+                // stores -- is half a part back from it.
+                handleDragEnd(
+                  part.id,
+                  e.target.x() / PX_PER_MM - (definition?.width ?? 0) / 2,
+                  e.target.y() / PX_PER_MM - (definition?.height ?? 0) / 2,
+                );
               }}
             >
               {shape}

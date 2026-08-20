@@ -96,11 +96,17 @@ export function terminalPositions(project: Project): Map<string, Point> {
       }
     }
 
+    // About the middle of the body, not the corner: a part turned about its corner swings away
+    // across the workspace instead of spinning where it sits, and lining it back up by hand after
+    // every quarter turn is not a feature. The canvas applies the same centre, which is what keeps
+    // wires on the legs they are attached to.
+    const centre = { x: definition.width / 2, y: definition.height / 2 };
+
     for (const pin of definition.pins) {
-      const local = rotate({ x: pin.x, y: pin.y }, part.rotation);
+      const local = rotate({ x: pin.x - centre.x, y: pin.y - centre.y }, part.rotation);
       positions.set(terminalId(part.id, pin.name), {
-        x: part.x + local.x,
-        y: part.y + local.y,
+        x: part.x + centre.x + local.x,
+        y: part.y + centre.y + local.y,
       });
     }
   }

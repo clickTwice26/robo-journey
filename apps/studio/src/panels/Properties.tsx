@@ -15,6 +15,8 @@ import {
   Button,
   Divider,
   IconButton,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
   FormControlLabel,
   MenuItem,
@@ -197,6 +199,9 @@ function StimulusControls({
   );
 }
 
+/** The four positions a part goes onto a bench in. */
+const QUARTERS = [0, 90, 180, 270];
+
 const QUANTITY_LABELS: Record<string, string> = {
   light: 'Light (lux)',
   sound: 'Loudness (dB)',
@@ -357,24 +362,39 @@ function Inspector() {
         </Button>
       )}
 
-      {/* Rotation is what aims a directional sensor, so it sits with position rather than buried
-          in a menu. Ninety degree steps because that is how parts go onto a bench; the field takes
-          anything for the cases where it does not. */}
-      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-        <TextField
-          label="Facing (deg)"
-          type="number"
-          value={String(Math.round(part.rotation))}
-          onChange={(e) => rotatePart(part.id, Number(e.target.value) || 0)}
-          helperText="0 points up the workspace"
-          sx={{ flex: 1 }}
-        />
-        <Tooltip title="Turn 90 degrees (R)">
-          <IconButton onClick={() => rotatePart(part.id, part.rotation + 90)}>
-            <Rotate90DegreesCwIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
-      </Stack>
+      {/* Quarter turns, shown as the four positions rather than as a number to type. Which way a
+          part faces is a thing you point at, not a value you calculate -- and for a directional
+          sensor it decides what the part can see at all. */}
+      <Box>
+        <Typography variant="caption" color="text.secondary">
+          Rotation
+        </Typography>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 0.5 }}>
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={QUARTERS.includes(Math.round(part.rotation)) ? Math.round(part.rotation) : null}
+            onChange={(_, value) => {
+              if (value !== null) rotatePart(part.id, value as number);
+            }}
+            sx={{ flex: 1 }}
+          >
+            {QUARTERS.map((degrees) => (
+              <ToggleButton key={degrees} value={degrees} sx={{ flex: 1, py: 0.25 }}>
+                {degrees}°
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+          <Tooltip title="Turn 90° (R, or Shift-R the other way)">
+            <IconButton onClick={() => rotatePart(part.id, part.rotation + 90)}>
+              <Rotate90DegreesCwIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Stack>
+        <Typography variant="caption" color="text.secondary">
+          0° points up the workspace. Sensors only detect what is inside the cone they face.
+        </Typography>
+      </Box>
 
       <Stack direction="row" spacing={1}>
         <TextField
