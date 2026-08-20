@@ -47,6 +47,7 @@ import {
   type RegisterValue,
   type ScopeFrame,
   type ScopeTrace,
+  type SoundingPart,
   type SimApi,
   type SimSnapshot,
   type TraceData,
@@ -65,10 +66,26 @@ import {
  * A short table rather than a manifest field, because emitting into the world is a property of a
  * handful of parts and inventing schema for it would be a lot of ceremony for two buzzers.
  */
-const SOUND_EMITTERS: Record<string, { plus: string; minus: string; defaultDb: number }> = {
-  'buzzer-active': { plus: '+', minus: '-', defaultDb: 85 },
-  'buzzer-passive': { plus: '+', minus: '-', defaultDb: 75 },
+const SOUND_EMITTERS: Record<
+  string,
+  { plus: string; minus: string; defaultDb: number; defaultHz: number }
+> = {
+  'buzzer-active': { plus: '+', minus: '-', defaultDb: 85, defaultHz: 2300 },
+  // A passive buzzer has no pitch of its own. The figure here is only what to fall back on if it
+  // is being held at a steady level, which is a passive buzzer being used wrongly.
+  'buzzer-passive': { plus: '+', minus: '-', defaultDb: 75, defaultHz: 1000 },
 };
+
+/** Recorder channel holding a buzzer's drive waveform. */
+const soundChannel = (partId: string): string => `sound:${partId}`;
+
+/**
+ * How much of the drive waveform to look at when measuring its pitch.
+ *
+ * Long enough to hold several cycles of the lowest note anyone plays on one of these, short enough
+ * that a changing tone is heard as changing rather than smeared.
+ */
+const SOUND_WINDOW_SECONDS = 0.06;
 
 /** Hold a value inside a state variable's declared range, as the real quantity would be. */
 const clamp = (value: number, min: number, max: number): number =>
@@ -281,6 +298,60 @@ class Simulation implements SimApi {
   }
 
   /**
+   * What each buzzer is doing, measured off its own drive waveform.
+   *
+   * Steady voltage means an active buzzer, which has a pitch of its own and sounds at it. A
+   * waveform crossing back and forth means a passive one, whose pitch is whatever the sketch is
+   * toggling the pin at -- so it is counted rather than assumed.
+   */
+  private soundingParts(): SoundingPart[] {
+    if (!this.built || !this.project) return [];
+
+    const board = this.built.board;
+    const to = board.time;
+    const from = Math.max(0, to - SOUND_WINDOW_SECONDS);
+    const out: SoundingPart[] = [];
+
+    for (const part of this.project.parts) {
+      const emitter = SOUND_EMITTERS[part.type];
+      if (!emitter) continue;
+
+      const window = board.recorder.window(soundChannel(part.id), from, to, 4000);
+      if (!window || window.values.length < 2) continue;
+
+      let peak = 0;
+      for (const value of window.values) peak = Math.max(peak, Math.abs(value));
+      if (peak < 1) continue;
+
+      // Crossings of half the peak, counted in one direction only -- a full cycle crosses twice.
+      // Timed between the first and last crossing rather than across the whole window: the window
+      // edges do not fall on cycle boundaries, and dividing by the window instead over-counts by
+      // up to a cycle, which at low notes is most of the answer.
+      const threshold = peak / 2;
+      const crossings: number[] = [];
+      for (let i = 1; i < window.values.length; i++) {
+        const before = Math.abs(window.values[i - 1]!);
+        const after = Math.abs(window.values[i]!);
+        if (before < threshold && after >= threshold) crossings.push(window.times[i]!);
+      }
+
+      const elapsed = crossings.length >= 2 ? crossings[crossings.length - 1]! - crossings[0]! : 0;
+      const declared = Number(part.props.frequencyHz ?? emitter.defaultHz);
+      // Fewer than two crossings is a steady level, not a tone: that is an active buzzer being
+      // switched on, and its pitch comes from the part rather than from the pin.
+      const hz = elapsed > 0 ? (crossings.length - 1) / elapsed : declared;
+
+      out.push({
+        partId: part.id,
+        hz: Math.min(12_000, Math.max(50, hz)),
+        db: Number(part.props.volumeDb ?? emitter.defaultDb),
+      });
+    }
+
+    return out;
+  }
+
+  /**
    * Sound coming out of the circuit rather than out of the toolkit.
    *
    * Only while the thing is actually being driven, read off the voltage across its own terminals
@@ -357,6 +428,7 @@ class Simulation implements SimApi {
 
     return {
       scopes: this.scopeFrames(),
+      sounds: this.soundingParts(),
       running: this.running,
       driven: this.driven,
       time: board.time,
@@ -595,6 +667,22 @@ class Simulation implements SimApi {
     for (const address of previousBreakpoints) this.built.board.setBreakpoint(address);
 
     this.hasCircuitEmitters = this.project.parts.some((p) => p.type in SOUND_EMITTERS);
+
+    // Record what is across each buzzer. Sampled on every solve, which is the only way to see a
+    // 2 kHz square wave -- reading the voltage once a frame would alias it into nonsense.
+    for (const part of this.project.parts) {
+      const emitter = SOUND_EMITTERS[part.type];
+      if (!emitter) continue;
+      const plus = this.built.nodes.get(`${part.id}:${emitter.plus}`);
+      const minus = this.built.nodes.get(`${part.id}:${emitter.minus}`);
+      if (plus === undefined || minus === undefined) continue;
+
+      const circuit = this.built.board.circuit;
+      this.built.board.watchProbe(
+        { id: soundChannel(part.id), kind: 'analog', label: `${part.id} drive` },
+        () => circuit.voltage(plus) - circuit.voltage(minus),
+      );
+    }
 
     // A rebuild makes fresh devices, which start at their defaults. Without this, moving a wire
     // would put every sensor back to its power-on state while the flame was still burning.

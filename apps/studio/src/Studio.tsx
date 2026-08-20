@@ -36,6 +36,7 @@ import { AssistantPanel } from './panels/Assistant.tsx';
 import { DatasheetDialog } from './panels/DatasheetDialog.tsx';
 import { CloudProjectsDialog } from './panels/CloudProjectsDialog.tsx';
 import { LibraryDialog } from './panels/LibraryDialog.tsx';
+import { useBuzzerAudio } from './sim/useAudio.ts';
 import { restoreLibrary } from './library.ts';
 import type { AccessGate as Gate } from './useAccess.ts';
 import { AUTOSAVE_DELAY_MS, saveWorkspace } from './persistence.ts';
@@ -89,6 +90,12 @@ export function Studio({ gate }: { gate: Gate }) {
   const [datasheetOpen, setDatasheetOpen] = useState(false);
   const [cloudOpen, setCloudOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+
+  // Buzzers, out loud. The pitch and loudness come from the worker's measurement of the actual
+  // drive waveform, so this plays what the circuit is doing rather than a sound effect.
+  const sounds = useStudio((s) => s.snapshot.sounds);
+  const soundOn = useStudio((s) => s.soundOn);
+  useBuzzerAudio(sounds, soundOn);
   /**
    * Bumped whenever the dockview layout changes.
    *

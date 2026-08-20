@@ -45,6 +45,13 @@ interface StudioState {
   snapshot: SimSnapshot;
   selection: string | null;
   mode: CanvasMode;
+  /**
+   * Whether buzzers are audible.
+   *
+   * On by default: a simulator that models a buzzer and then stays silent is answering a question
+   * nobody asked. Off is one click away, because a 2 kHz square wave gets old.
+   */
+  soundOn: boolean;
 
   /** Signed-in user, or null. Undefined until the first check completes. */
   user: User | null | undefined;
@@ -89,6 +96,7 @@ interface StudioState {
   setCloudProject(id: string | null): void;
   setSyncState(syncedAt: Date | null, syncError: string | null): void;
   setSnapshot(snapshot: SimSnapshot): void;
+  toggleSound(): void;
   /**
    * Zoom and fit, published by the canvas so the View menu can reach them.
    *
@@ -139,6 +147,7 @@ export const useStudio = create<StudioState>((set, get) => ({
   past: [],
   future: [],
   snapshot: EMPTY_SNAPSHOT,
+  soundOn: true,
   selection: null,
   mode: { kind: 'select' },
 
@@ -268,6 +277,7 @@ export const useStudio = create<StudioState>((set, get) => ({
   setSyncState: (syncedAt, syncError) => set({ syncedAt, syncError }),
 
   setSnapshot: (snapshot) => set({ snapshot }),
+  toggleSound: () => set((state) => ({ soundOn: !state.soundOn })),
   canvasControls: null,
   setCanvasControls: (canvasControls) => set({ canvasControls }),
   setSelection: (selection) => set({ selection }),

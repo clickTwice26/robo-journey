@@ -13,6 +13,7 @@ import { loadHex } from '@robo-journey/sim-core';
 import {
   ManifestDevice,
   buildCircuit,
+  libraryProject,
   environmentSources,
   fieldAt,
   installBuiltinManifests,
@@ -234,5 +235,56 @@ describe('a magnet and a reed switch', () => {
     expect(build(5)).toBeGreaterThan(0.9);
     // Two reaches out, an inverse cube has already thrown almost all of it away.
     expect(build(30)).toBeLessThan(0.2);
+  });
+});
+
+describe('the smoke alarm project', () => {
+  /**
+   * The bug this exists to stop coming back.
+   *
+   * The threshold was set where the MQ-2 could only reach it with the flame essentially touching
+   * the sensor -- the alarm was unreachable, and the only symptom was a circuit that looked
+   * perfect and never went off. A number chosen by eye needs a test that says what it has to be
+   * able to do.
+   */
+  function alarmOutput(flameDistanceMm: number): number {
+    installBuiltinManifests();
+    const project = libraryProject('gas-alarm')!.build();
+
+    // Switch the flame on and put it where someone would drop it: near, not touching.
+    const gas = project.parts.find((p) => p.id === 'gas')!;
+    const staged = {
+      ...project,
+      parts: project.parts.map((part) =>
+        part.id === 'fire'
+          ? { ...part, x: gas.x + flameDistanceMm, y: gas.y, props: { ...part.props, on: true } }
+          : part,
+      ),
+    };
+
+    const built = buildCircuit(staged, { progMem: blink() });
+    expect(built.problems).toEqual([]);
+
+    const sources = environmentSources(staged);
+    const device = built.devices.get('gas') as ManifestDevice;
+    const variable = partDefinition('mq2').state!.find((v) => v.name === 'ppm')!;
+    device.setState(
+      'ppm',
+      Math.min(variable.max, fieldAt(sources, 'gas', gas.x, gas.y, variable.default)),
+    );
+
+    built.board.runFor(0.02);
+    // What analogRead would return.
+    const volts = built.board.circuit.voltage(built.nodes.get('gas:AOUT')!);
+    return Math.round((volts / 5) * 1023);
+  }
+
+  it('trips at a distance anyone would call "next to it"', () => {
+    // The sketch alarms above 180. A fire 30 mm away has to be enough.
+    expect(alarmOutput(30)).toBeGreaterThan(180);
+  });
+
+  it('stays quiet with the fire across the bench', () => {
+    expect(alarmOutput(200)).toBeLessThan(180);
   });
 });

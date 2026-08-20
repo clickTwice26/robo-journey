@@ -20,6 +20,7 @@ import {
   Menu,
   MenuItem,
   Stack,
+  IconButton,
   Toolbar,
   Tooltip,
   Typography,
@@ -32,6 +33,8 @@ import BuildIcon from '@mui/icons-material/Build';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import CollectionsBookmarkIcon from '@mui/icons-material/CollectionsBookmark';
+import VolumeUpIcon from '@mui/icons-material/VolumeUp';
+import VolumeOffIcon from '@mui/icons-material/VolumeOff';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import PauseIcon from '@mui/icons-material/Pause';
@@ -136,6 +139,8 @@ export function MenuBar({
 }: Props) {
   const project = useStudio((s) => s.project);
   const snapshot = useStudio((s) => s.snapshot);
+  const soundOn = useStudio((s) => s.soundOn);
+  const toggleSound = useStudio((s) => s.toggleSound);
   const compileStatus = useStudio((s) => s.compileStatus);
   const hex = useStudio((s) => s.hex);
   const selection = useStudio((s) => s.selection);
@@ -651,6 +656,20 @@ export function MenuBar({
         </Button>
 
         <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+
+        {/* Only shown when there is something in the circuit that can make a noise, so the button
+            answers "why is it silent" at exactly the moment anyone asks it. */}
+        {snapshot.sounds.length > 0 || soundOn === false ? (
+          <Tooltip title={soundOn ? 'Buzzers are audible' : 'Buzzers are muted'}>
+            <IconButton
+              size="small"
+              onClick={toggleSound}
+              color={soundOn && snapshot.sounds.length > 0 ? 'primary' : 'default'}
+            >
+              {soundOn ? <VolumeUpIcon fontSize="small" /> : <VolumeOffIcon fontSize="small" />}
+            </IconButton>
+          </Tooltip>
+        ) : null}
 
         <Chip size="small" variant="outlined" label={`t = ${snapshot.time.toFixed(3)} s`} sx={{ fontVariantNumeric: 'tabular-nums' }} />
         <Chip size="small" variant="outlined" label={`${snapshot.cycles.toLocaleString()} cycles`} sx={{ fontVariantNumeric: 'tabular-nums' }} />

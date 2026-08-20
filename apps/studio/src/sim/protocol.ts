@@ -45,12 +45,30 @@ export interface SimSnapshot {
    * instrument's own face, and sending thousands of points per frame for that would be waste.
    */
   readonly scopes: Record<string, ScopeFrame>;
+  /** Parts currently making a noise, so the app can actually play it. */
+  readonly sounds: readonly SoundingPart[];
   /** Anything written to Serial since the last poll. Cleared on read. */
   readonly serial: string;
   /** Problems reported while building the circuit, e.g. an unknown part. */
   readonly problems: readonly string[];
   /** Byte address execution is stopped at, when a breakpoint stopped it. */
   readonly stoppedAt: number | null;
+}
+
+/**
+ * A part that is making a noise, and what noise.
+ *
+ * Measured rather than declared. An active buzzer sits at a steady voltage and sounds at its own
+ * fixed pitch; a passive one has no pitch of its own at all -- it sounds at whatever rate the pin
+ * is being toggled, which is the entire difference between the two parts and the only reason
+ * anyone chooses the passive one.
+ */
+export interface SoundingPart {
+  readonly partId: string;
+  /** Hertz. */
+  readonly hz: number;
+  /** Loudness at the part, decibels. */
+  readonly db: number;
 }
 
 /** One channel's worth of what a scope on the canvas is displaying. */
@@ -92,6 +110,7 @@ export const EMPTY_SNAPSHOT: SimSnapshot = {
   readouts: {},
   driven: {},
   scopes: {},
+  sounds: [],
   faults: [],
   serial: '',
   problems: [],
