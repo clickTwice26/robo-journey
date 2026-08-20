@@ -26,7 +26,8 @@ export type { ProjectSummary, PublicUser, StoredProject } from './store.js';
 
 export {
   ACCESS_CAPACITY,
-  ACCESS_COOLDOWN_MS,
+  ACCESS_MAX_COOLDOWN_MS,
+  ACCESS_MIN_COOLDOWN_MS,
   ACCESS_GRACE_MS,
   ACCESS_IDLE_MS,
   ACCESS_SESSION_MS,

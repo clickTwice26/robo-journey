@@ -7,8 +7,8 @@
  *
  * The one rule the whole screen is built around is that people should never be surprised: the
  * cooldown counts down rather than saying "later", a seat passed on for idleness says so and says
- * the time is kept, and the fact that leaving early still costs twenty minutes is stated up front
- * rather than discovered afterwards.
+ * the time is kept, and the fact that leaving early costs the same wait as running out of time is
+ * stated up front rather than discovered afterwards.
  *
  * What it does *not* show is deliberate too. No seat count, no queue length in numbers, no
  * estimated wait. A wait estimate is a promise that cannot be kept -- it moves every time anyone
@@ -334,8 +334,9 @@ function Cooldown({ gate, access }: { gate: Gate; access: AccessStatus }) {
           {remaining === null ? '—' : formatDuration(remaining)}
         </Typography>
         <Typography variant="body2" color="text.secondary" align="center">
-          There is a 20-minute wait between turns so everyone gets one. You will rejoin the queue
-          automatically when it ends.
+          There is a short wait between turns so everyone gets one — longer when people are
+          queuing, barely anything when they are not. You will rejoin automatically when it ends,
+          and if the queue clears in the meantime this gets shorter.
         </Typography>
         <Typography variant="caption" color="text.secondary" align="center">
           Your circuits are saved. Nothing is lost.

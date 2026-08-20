@@ -1,7 +1,13 @@
 # Running robo-journey
 
 Postgres holds everything that must survive a restart: accounts, sessions, saved projects, and the
-queue. Redis holds the two things that are better off ephemeral — rate-limit counters and the
+queue.
+
+The wait between turns is not a fixed number. It is worked out from how many people are queuing at
+the moment a seat is given up — the minimum when nobody is waiting, rising toward the maximum as
+the queue lengthens — and an outstanding wait is shortened again if the queue clears, though never
+lengthened. A cooldown exists to stop one person cycling through the same seat forever, and that
+only matters when somebody else wants it. Redis holds the two things that are better off ephemeral — rate-limit counters and the
 compile cache — and losing all of it costs nothing but a few recompiles.
 
 ## The stack
@@ -62,7 +68,8 @@ whichever request happened to need it first.
 | `REDIS_URL` | — | Required. |
 | `RJ_ACCESS_CAPACITY` | `10` | People using the simulator at once. |
 | `RJ_ACCESS_SESSION_MINUTES` | `60` | Length of a turn. |
-| `RJ_ACCESS_COOLDOWN_MINUTES` | `20` | Wait between turns. |
+| `RJ_ACCESS_COOLDOWN_MIN_MINUTES` | `1` | Wait between turns when nobody is queuing. |
+| `RJ_ACCESS_COOLDOWN_MAX_MINUTES` | `20` | Ceiling on that wait, reached when the queue is as long as the room is wide. |
 | `RJ_ACCESS_IDLE_MINUTES` | `2` | Untouched seat passes to the next person. |
 | `RJ_TRUST_PROXY` | `false` | Turn on **only** behind something that sets `X-Forwarded-For`. Trusting it otherwise lets any client claim any address and every per-address limit becomes decorative. |
 | `RJ_DB_SSL` | `false` | Verify the server certificate. |

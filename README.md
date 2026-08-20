@@ -207,7 +207,9 @@ SHA-256 hash, so a leaked database does not hand over live sessions. Cookies are
 `SameSite=Strict`.
 
 **A queue**, because an account alone does not make the simulator usable — ten people can use it at
-once, for an hour each, and everyone else waits in line and is let in automatically. That limit is
+once, for an hour each, and everyone else waits in line and is let in automatically. The wait
+between turns is worked out from how many people are queuing rather than fixed: about a minute when
+the place is quiet, longer when it is busy, and shortened again if the queue clears. That limit is
 the reason the store is Postgres rather than a file: two service instances each seeing nine seats
 taken would each admit someone into the tenth. Every reconcile pass runs in a transaction holding
 an advisory lock, so "ten" means ten no matter how many processes are serving.

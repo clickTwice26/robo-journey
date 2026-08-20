@@ -378,7 +378,7 @@ export function MenuBar({
               {
                 label: 'End session and sign out',
                 icon: <LogoutIcon fontSize="small" />,
-                secondary: 'Frees your seat. The 20-minute wait applies either way.',
+                secondary: 'Frees your seat. The wait before your next turn applies either way.',
                 onClick: signOut,
               },
             ]
@@ -618,7 +618,7 @@ function SeatCountdown({ expiresAt }: { expiresAt: string | null }) {
     <Tooltip
       title={
         minutes < 5
-          ? 'Your hour is nearly up. Save anything you want to keep — a 20-minute wait follows.'
+          ? 'Your hour is nearly up. Save anything you want to keep — a wait follows before your next turn.'
           : 'Time left in this session. Ten people can use the simulator at once, an hour each.'
       }
     >

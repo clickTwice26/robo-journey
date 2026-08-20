@@ -92,6 +92,17 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE SEQUENCE access_queue_seq;
     `,
   },
+  {
+    id: 3,
+    name: 'cooldown-from',
+    sql: `
+      -- When the cooldown began, as distinct from when it ends. The end moves: a cooldown is set
+      -- from how contended the simulator was at the moment a seat was given up, and it is
+      -- recalculated as the queue drains, so someone is never held out for a crowd that has since
+      -- gone home. Without the start there is nothing to recalculate from.
+      ALTER TABLE access ADD COLUMN cooldown_from TIMESTAMPTZ;
+    `,
+  },
 ];
 
 /** Bring the schema up to date. Safe to run concurrently from any number of instances. */

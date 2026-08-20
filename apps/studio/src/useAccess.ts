@@ -202,12 +202,12 @@ export function useAccess(): AccessGate {
   /*
    * There is deliberately no "release the seat on the way out" beacon here.
    *
-   * It looks like an easy win -- hand the seat over the moment a tab closes instead of waiting
-   * ninety seconds for the heartbeat to lapse -- and it is a trap. Neither `unload` nor
-   * `pagehide` can tell a close from a reload, and releasing a seat starts the twenty minute
-   * cooldown, so pressing F5 would lock someone out for twenty minutes. Ninety seconds of a seat
-   * occasionally sitting idle is a far smaller cost than that, and the grace period exists to
-   * cover exactly this case. Signing out, which is unambiguous, releases the seat properly.
+   * It looks like an easy win -- hand the seat over the moment a tab closes instead of waiting for
+   * the heartbeat to lapse -- and it is a trap. Neither `unload` nor `pagehide` can tell a close
+   * from a reload, and releasing a seat starts a cooldown, so pressing F5 would put someone out of
+   * their own session. A seat occasionally sitting idle for a couple of minutes is a far smaller
+   * cost than that, and the grace period exists to cover exactly this case. Signing out, which is
+   * unambiguous, releases the seat properly.
    */
 
   return {

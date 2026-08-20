@@ -20,7 +20,8 @@ describeWithDb('access control', () => {
   /** Small capacity so the queue can be exercised without registering ten accounts each time. */
   const CAPACITY = 3;
   const SESSION_MS = 60 * 60 * 1000;
-  const COOLDOWN_MS = 20 * 60 * 1000;
+  const MAX_COOLDOWN_MS = 20 * 60 * 1000;
+  const MIN_COOLDOWN_MS = 60 * 1000;
   const IDLE_MS = 2 * 60 * 1000;
   const GRACE_MS = 3 * 60 * 1000;
 
@@ -30,7 +31,8 @@ describeWithDb('access control', () => {
     store = new AccountStore(backends.pool, {
       capacity: CAPACITY,
       sessionMs: SESSION_MS,
-      cooldownMs: COOLDOWN_MS,
+      maxCooldownMs: MAX_COOLDOWN_MS,
+      minCooldownMs: MIN_COOLDOWN_MS,
       idleMs: IDLE_MS,
       graceMs: GRACE_MS,
       // The clock is injected here and only here. In production the database's own clock is used,
@@ -170,8 +172,9 @@ describeWithDb('access control', () => {
       await store.access.request(a!);
       await advance(SESSION_MS, a!);
 
+      // Nobody waiting and nine seats free, so this is the floor rather than the ceiling.
       const status = await store.access.status(a!);
-      expect(status.cooldownUntil).toBe(new Date(clock + COOLDOWN_MS).toISOString());
+      expect(status.cooldownUntil).toBe(new Date(clock + MIN_COOLDOWN_MS).toISOString());
     });
 
     it('refuses to re-queue during the cooldown', async () => {
@@ -180,7 +183,7 @@ describeWithDb('access control', () => {
       await advance(SESSION_MS, a!);
 
       await expect(store.access.request(a!)).rejects.toThrow(CooldownError);
-      await advance(COOLDOWN_MS - 2000);
+      await advance(MIN_COOLDOWN_MS - 2000);
       await expect(store.access.request(a!)).rejects.toThrow(CooldownError);
     });
 
@@ -188,7 +191,7 @@ describeWithDb('access control', () => {
       const [a] = await users(1);
       await store.access.request(a!);
       await advance(SESSION_MS, a!);
-      await advance(COOLDOWN_MS);
+      await advance(MAX_COOLDOWN_MS);
 
       expect((await store.access.status(a!)).state).toBe('idle');
       expect((await store.access.request(a!)).state).toBe('active');
@@ -198,7 +201,7 @@ describeWithDb('access control', () => {
       const [a] = await users(1);
       await store.access.request(a!);
       await advance(SESSION_MS, a!);
-      await advance(COOLDOWN_MS);
+      await advance(MAX_COOLDOWN_MS);
 
       const status = await store.access.request(a!);
       expect(status.expiresAt).toBe(new Date(clock + SESSION_MS).toISOString());
@@ -454,11 +457,13 @@ describeWithDb('access control', () => {
     });
 
     it('still cools down when the hour runs out while idle', async () => {
-      // Idleness sends you to the back of the line; a finished hour is finished either way.
+      // Idleness sends you to the back of the line; a finished hour is finished either way. Checked
+      // just past the hour rather than well past it: with nobody waiting the cooldown is only a
+      // minute, so idling on through it would find them out the other side and prove nothing.
       const [a] = (await users(1)).map((id) => id!);
       await store.access.request(a!);
-      await advance(SESSION_MS - 60 * 1000, a!);
-      await idleAway(2 * 60 * 1000, [a!]);
+      await advance(SESSION_MS - 30 * 1000, a!);
+      await idleAway(31 * 1000, [a!]);
 
       expect((await store.access.status(a!)).state).toBe('cooldown');
     });
@@ -470,6 +475,102 @@ describeWithDb('access control', () => {
       await store.access.request(a!);
       await advance(GRACE_MS + 1000);
       expect((await store.access.status(a!)).state).toBe('cooldown');
+    });
+  });
+
+  describe('how long the cooldown is', () => {
+    /** Everyone in `ids` takes a seat and stays at the keyboard. */
+    const seat = async (ids: string[]) => {
+      for (const id of ids) await store.access.request(id);
+    };
+
+    it('is the floor when nobody is waiting', async () => {
+      // Holding someone out for twenty minutes while seats sit empty is friction with no
+      // beneficiary. The minute that remains is the window that stops them retaking the seat
+      // before anyone else can see it.
+      const [a] = (await users(1)).map((id) => id!);
+      await seat([a!]);
+      await advance(SESSION_MS, a!);
+
+      const status = await store.access.status(a!);
+      expect(new Date(status.cooldownUntil!).getTime() - clock).toBe(MIN_COOLDOWN_MS);
+    });
+
+    it('grows when the queue outlasts the seats that just freed', async () => {
+      // The queue has to be longer than the number of seats coming free, or everyone waiting is
+      // admitted by the same pass and there is nobody left to protect -- which is the floor case,
+      // correctly.
+      const ids = (await users(CAPACITY * 2 + 1)).map((id) => id!);
+      for (const id of ids) await store.access.request(id);
+
+      await advance(SESSION_MS, ...ids);
+      const wait = new Date((await store.access.status(ids[0]!)).cooldownUntil!).getTime() - clock;
+      expect(wait).toBeGreaterThan(MIN_COOLDOWN_MS);
+      expect(wait).toBeLessThanOrEqual(MAX_COOLDOWN_MS);
+    });
+
+    it('is the floor when the queue is short enough to be served at once', async () => {
+      // Everyone waiting gets a seat in the same pass, so nobody is left wanting one.
+      const ids = (await users(CAPACITY + 1)).map((id) => id!);
+      for (const id of ids) await store.access.request(id);
+
+      await advance(SESSION_MS, ...ids);
+      const wait = new Date((await store.access.status(ids[0]!)).cooldownUntil!).getTime() - clock;
+      expect(wait).toBe(MIN_COOLDOWN_MS);
+    });
+
+    it('never exceeds the ceiling, however long the queue', async () => {
+      const ids = (await users(CAPACITY * 3)).map((id) => id!);
+      for (const id of ids) await store.access.request(id);
+      await advance(SESSION_MS, ...ids);
+
+      const status = await store.access.status(ids[0]!);
+      expect(new Date(status.cooldownUntil!).getTime() - clock).toBeLessThanOrEqual(MAX_COOLDOWN_MS);
+    });
+
+    it('shortens as the queue drains', async () => {
+      // Somebody who finished while a crowd was waiting should not still be held out once the
+      // crowd has gone home.
+      const ids = (await users(CAPACITY * 4)).map((id) => id!);
+      for (const id of ids) await store.access.request(id);
+      await advance(SESSION_MS, ...ids);
+
+      const heldOut = ids[0]!;
+      const busy = new Date((await store.access.status(heldOut)).cooldownUntil!).getTime();
+      expect(busy - clock).toBeGreaterThan(MIN_COOLDOWN_MS);
+
+      // Everyone still queuing gives up.
+      for (const id of ids) {
+        if ((await store.access.status(id)).state === 'queued') await store.access.release(id);
+      }
+
+      const quiet = new Date((await store.access.status(heldOut)).cooldownUntil!).getTime();
+      expect(quiet).toBeLessThan(busy);
+    });
+
+    it('never lengthens once set', async () => {
+      // The reverse would mean the place filling up after you left costing you extra time, which
+      // is punishing somebody for someone else's arrival.
+      const ids = (await users(CAPACITY * 4)).map((id) => id!);
+      await seat(ids.slice(0, CAPACITY));
+      await advance(SESSION_MS, ...ids.slice(0, CAPACITY));
+
+      const finished = ids[0]!;
+      const before = new Date((await store.access.status(finished)).cooldownUntil!).getTime();
+
+      // A crowd turns up straight afterwards.
+      for (const id of ids.slice(CAPACITY)) await store.access.request(id);
+
+      const after = new Date((await store.access.status(finished)).cooldownUntil!).getTime();
+      expect(after).toBe(before);
+    });
+
+    it('computes the same figure the controller would', () => {
+      // The rule itself, stated once so the arithmetic is checkable without a database.
+      expect(store.access.cooldownFor({ waiting: 0, free: 3 })).toBe(MIN_COOLDOWN_MS);
+      expect(store.access.cooldownFor({ waiting: CAPACITY, free: 0 })).toBe(MAX_COOLDOWN_MS);
+      expect(store.access.cooldownFor({ waiting: 100, free: 0 })).toBe(MAX_COOLDOWN_MS);
+      expect(store.access.cooldownFor({ waiting: 1, free: 0 })).toBeGreaterThan(MIN_COOLDOWN_MS);
     });
   });
 
@@ -501,7 +602,8 @@ describeWithDb('access control', () => {
     const defaults = new AccountStore(backends.pool);
     expect(defaults.access.capacity).toBe(10);
     expect(defaults.access.sessionMs).toBe(60 * 60 * 1000);
-    expect(defaults.access.cooldownMs).toBe(20 * 60 * 1000);
+    expect(defaults.access.maxCooldownMs).toBe(20 * 60 * 1000);
+    expect(defaults.access.minCooldownMs).toBe(60 * 1000);
     expect(defaults.access.idleMs).toBe(2 * 60 * 1000);
   });
 });

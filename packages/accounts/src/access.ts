@@ -13,12 +13,19 @@
  *   - A seat has to be *used*. Two minutes with the tab in the background or nobody touching the
  *     keyboard or mouse and it passes to the next person in line.
  *   - However a seat ends for good -- the hour running out, signing out, closing the tab -- a
- *     twenty minute cooldown follows before that account can queue again.
+ *     cooldown follows before that account can queue again, and how long it is depends on how
+ *     many people are waiting.
  *
- * The cooldown is what makes the scheme hold. Without it, anyone at fifty-nine minutes could
- * release their seat and immediately take it again for another hour, and the limit would mean
- * nothing. It does mean leaving early costs the same as being timed out, which is worth saying
- * plainly in the interface rather than surprising people with.
+ * That last part is the whole point of `cooldownFor`. A cooldown exists to stop one person cycling
+ * through the same seat forever, and that only matters when somebody else wants it. Holding
+ * someone out for twenty minutes while ten seats sit empty and nobody is queuing serves nobody: it
+ * is friction with no beneficiary. So the wait is a minute when the place is quiet and grows with
+ * the queue, and an outstanding cooldown is shortened as the queue drains -- nobody should be kept
+ * out for a crowd that has since gone home.
+ *
+ * A cooldown of *nothing* is still wrong, which is why the floor is a minute rather than zero:
+ * without it whoever just finished retakes the seat in the same instant it frees, and someone
+ * arriving a second later never sees it.
  *
  * Being idle is treated differently, and more gently: it sends someone to the back of the queue
  * rather than into a cooldown, because they have not finished, they have simply stopped for a
@@ -43,8 +50,21 @@ import { LOCK_ACCESS_RECONCILE, withTransaction } from './db.js';
 export const ACCESS_CAPACITY = 10;
 /** How long a seat lasts once taken. */
 export const ACCESS_SESSION_MS = 60 * 60 * 1000;
-/** How long an account must wait after a seat ends before it can queue again. */
-export const ACCESS_COOLDOWN_MS = 20 * 60 * 1000;
+/**
+ * The longest an account is ever held out after a seat ends.
+ *
+ * A ceiling, not a constant. See `cooldownFor`.
+ */
+export const ACCESS_MAX_COOLDOWN_MS = 20 * 60 * 1000;
+
+/**
+ * The shortest.
+ *
+ * Not zero, because a cooldown of nothing lets whoever just finished retake the seat in the same
+ * instant it frees, and someone arriving a second later never sees it. A minute is long enough to
+ * be a real window for somebody else and short enough not to feel like a punishment.
+ */
+export const ACCESS_MIN_COOLDOWN_MS = 60 * 1000;
 
 /**
  * How long someone may hold a seat without using it.
@@ -105,7 +125,10 @@ export interface AccessStatus {
 export interface AccessConfig {
   readonly capacity?: number;
   readonly sessionMs?: number;
-  readonly cooldownMs?: number;
+  /** Ceiling on the cooldown, reached only when the queue is as long as the room is wide. */
+  readonly maxCooldownMs?: number;
+  /** Floor on the cooldown, applied when nobody is waiting. */
+  readonly minCooldownMs?: number;
   readonly idleMs?: number;
   readonly graceMs?: number;
   /**
@@ -116,6 +139,12 @@ export interface AccessConfig {
    * which cannot wait an hour to find out what happens after one.
    */
   readonly now?: () => number;
+}
+
+/** Seats taken and people waiting, which is all the cooldown depends on. */
+interface Demand {
+  readonly waiting: number;
+  readonly free: number;
 }
 
 interface AccessRow {
@@ -141,7 +170,8 @@ export class CooldownError extends Error {
 export class AccessController {
   readonly capacity: number;
   readonly sessionMs: number;
-  readonly cooldownMs: number;
+  readonly maxCooldownMs: number;
+  readonly minCooldownMs: number;
   readonly idleMs: number;
   readonly graceMs: number;
   private readonly clock: (() => number) | undefined;
@@ -152,7 +182,11 @@ export class AccessController {
   ) {
     this.capacity = config.capacity ?? ACCESS_CAPACITY;
     this.sessionMs = config.sessionMs ?? ACCESS_SESSION_MS;
-    this.cooldownMs = config.cooldownMs ?? ACCESS_COOLDOWN_MS;
+    this.maxCooldownMs = config.maxCooldownMs ?? ACCESS_MAX_COOLDOWN_MS;
+    this.minCooldownMs = Math.min(
+      config.minCooldownMs ?? ACCESS_MIN_COOLDOWN_MS,
+      config.maxCooldownMs ?? ACCESS_MAX_COOLDOWN_MS,
+    );
     this.idleMs = config.idleMs ?? ACCESS_IDLE_MS;
     this.graceMs = config.graceMs ?? ACCESS_GRACE_MS;
     this.clock = config.now;
@@ -200,7 +234,7 @@ export class AccessController {
            state = 'queued', queue_seq = nextval('access_queue_seq'), queued_at = $2::timestamptz,
            started_at = NULL, expires_at = NULL, cooldown_until = NULL,
            last_seen_at = $2::timestamptz, last_active_at = $2::timestamptz,
-           carry_ms = NULL, last_reason = NULL`,
+           carry_ms = NULL, last_reason = NULL, cooldown_from = NULL`,
         [userId, now],
       );
 
@@ -249,12 +283,14 @@ export class AccessController {
       const current = await this.row(client, userId);
 
       if (current?.state === 'active') {
+        const wait = Math.round(this.cooldownFor(await this.demand(client)));
         await client.query(
-          `UPDATE access SET state = 'cooldown', cooldown_until = $2::timestamptz,
+          `UPDATE access SET state = 'cooldown', cooldown_from = $2::timestamptz,
+             cooldown_until = $2::timestamptz + make_interval(secs => $3::bigint / 1000.0),
              started_at = NULL, expires_at = NULL, queued_at = NULL, queue_seq = NULL,
              carry_ms = NULL, last_reason = 'expired'
            WHERE user_id = $1::uuid`,
-          [userId, new Date(now.getTime() + this.cooldownMs)],
+          [userId, now, wait],
         );
       } else if (current?.state === 'queued') {
         await client.query(
@@ -272,6 +308,35 @@ export class AccessController {
   /** True when this account may use the simulator right now. The one check that gates the tool. */
   async isActive(userId: string): Promise<boolean> {
     return (await this.status(userId)).state === 'active';
+  }
+
+  /**
+   * How long to hold someone out, given how busy the place is.
+   *
+   * The floor when nothing is contended, rising toward the ceiling as the queue lengthens, and
+   * reaching it when as many people are waiting as there are seats. Linear rather than anything
+   * cleverer because the number has to be explainable to the person waiting: one more person in
+   * front of you is one more increment, and that is the whole of it.
+   */
+  cooldownFor({ waiting, free }: Demand): number {
+    // Nobody waiting and somewhere to sit: there is nothing to protect, so this is only the window
+    // that stops the previous holder retaking the seat before anyone else can see it.
+    if (waiting === 0 && free > 0) return this.minCooldownMs;
+
+    const perWaiter = (this.maxCooldownMs - this.minCooldownMs) / Math.max(1, this.capacity);
+    return Math.min(this.maxCooldownMs, this.minCooldownMs + waiting * perWaiter);
+  }
+
+  /** Seats taken and people waiting, in one round trip. */
+  private async demand(client: PoolClient): Promise<Demand> {
+    const { rows } = await client.query<{ waiting: string; active: string }>(
+      `SELECT count(*) FILTER (WHERE state = 'queued') AS waiting,
+              count(*) FILTER (WHERE state = 'active') AS active
+         FROM access`,
+    );
+    const waiting = Number(rows[0]!.waiting);
+    const active = Number(rows[0]!.active);
+    return { waiting, free: Math.max(0, this.capacity - active) };
   }
 
   // --- Machinery ----------------------------------------------------------------------------------
@@ -302,17 +367,21 @@ export class AccessController {
    * has to see every seat freed by the steps above, or it would admit against a stale count.
    */
   private async reconcile(client: PoolClient, now: Date): Promise<void> {
-    const cooldownUntil = new Date(now.getTime() + this.cooldownMs);
     const staleBefore = new Date(now.getTime() - this.graceMs);
     const idleBefore = new Date(now.getTime() - this.idleMs);
 
+    // How contended things were as this pass began, which is what anyone losing a seat in it is
+    // held out by.
+    const entering = this.cooldownFor(await this.demand(client));
+
     // A seat whose hour is up, and a seat whose owner has vanished entirely, end the same way.
     await client.query(
-      `UPDATE access SET state = 'cooldown', cooldown_until = $1::timestamptz, started_at = NULL,
-         expires_at = NULL, queued_at = NULL, queue_seq = NULL, carry_ms = NULL,
+      `UPDATE access SET state = 'cooldown', cooldown_from = $1::timestamptz,
+         cooldown_until = $1::timestamptz + make_interval(secs => $2::bigint / 1000.0),
+         started_at = NULL, expires_at = NULL, queued_at = NULL, queue_seq = NULL, carry_ms = NULL,
          last_reason = 'expired'
-       WHERE state = 'active' AND (expires_at <= $2::timestamptz OR last_seen_at < $3::timestamptz)`,
-      [cooldownUntil, now, staleBefore],
+       WHERE state = 'active' AND (expires_at <= $1::timestamptz OR last_seen_at < $3::timestamptz)`,
+      [now, Math.round(entering), staleBefore],
     );
 
     // A seat nobody is using goes to whoever is next, and its holder goes to the back of the line
@@ -343,8 +412,24 @@ export class AccessController {
       [staleBefore],
     );
 
+    // Recalculated against how busy it is *now*, and only ever shortened. Someone who finished
+    // when twelve people were queuing should not still be waiting twenty minutes once the queue
+    // has emptied -- but nor should a cooldown grow because the place filled up after they left,
+    // which is what LEAST guarantees.
+    const current = Math.round(this.cooldownFor(await this.demand(client)));
     await client.query(
-      `UPDATE access SET state = 'idle', cooldown_until = NULL, carry_ms = NULL
+      `UPDATE access
+          SET cooldown_until = LEAST(
+                cooldown_until,
+                cooldown_from + make_interval(secs => $1::bigint / 1000.0)
+              )
+        WHERE state = 'cooldown' AND cooldown_from IS NOT NULL`,
+      [current],
+    );
+
+    await client.query(
+      `UPDATE access SET state = 'idle', cooldown_until = NULL, cooldown_from = NULL,
+         carry_ms = NULL
         WHERE state = 'cooldown' AND cooldown_until <= $1::timestamptz`,
       [now],
     );
