@@ -160,7 +160,7 @@ export function validateManifest(manifest: ComponentManifest): ValidationResult 
   // circuit; they have no supply pin of their own and demanding one would reject every one of them.
   // Discrete two- and three-terminal devices are wired into someone else's circuit and have no
   // supply pin of their own; demanding one would reject every transistor, MOSFET and pot.
-  const isActive = !['passive', 'variable-resistor', 'transistor', 'mosfet', 'potentiometer']
+  const isActive = !['passive', 'variable-resistor', 'transistor', 'mosfet', 'potentiometer', 'diode', 'capacitor']
     .includes(manifest.behavior.kind);
 
   if (isActive && !hasPower) {
@@ -417,6 +417,26 @@ export function validateManifest(manifest: ComponentManifest): ValidationResult 
       break;
     }
 
+    case 'source': {
+      requirePin('behavior.positivePin', behavior.positivePin, 'The positive terminal');
+      requirePin('behavior.negativePin', behavior.negativePin, 'The negative terminal');
+      if (behavior.positivePin === behavior.negativePin) {
+        error('behavior.negativePin', 'Both terminals are the same pin; the supply is shorted to itself.');
+      }
+      if (Math.abs(behavior.volts) > IMPLAUSIBLE_VOLTS) {
+        error('behavior.volts', `${behavior.volts} V is implausible for a breadboard supply.`);
+      }
+      if (behavior.internalOhms > 100) {
+        // Above this it is not a supply any more, it is a supply with a resistor in the way, and
+        // nothing downstream of it will work as the schematic suggests.
+        warn(
+          'behavior.internalOhms',
+          `${behavior.internalOhms} ohm of internal resistance would collapse under any real load.`,
+        );
+      }
+      break;
+    }
+
     case 'potentiometer': {
       for (const key of ['terminalAPin', 'wiperPin', 'terminalBPin'] as const) {
         requirePin(`behavior.${key}`, behavior[key], 'Potentiometer');
@@ -425,6 +445,37 @@ export function validateManifest(manifest: ComponentManifest): ValidationResult 
         error('behavior', 'A potentiometer needs three distinct terminals.');
       }
       requireState('behavior.state', behavior.state, 'Potentiometer');
+      break;
+    }
+
+    case 'diode': {
+      requirePin('behavior.anodePin', behavior.anodePin, 'Diode');
+      requirePin('behavior.cathodePin', behavior.cathodePin, 'Diode');
+      if (behavior.anodePin === behavior.cathodePin) {
+        error('behavior.cathodePin', 'A diode shorted to itself is a wire.');
+      }
+      // Beyond this the junction stops behaving like silicon and Newton has to work for a result
+      // that means nothing anyway.
+      if (behavior.emissionCoefficient > 4) {
+        warn(
+          'behavior.emissionCoefficient',
+          `${behavior.emissionCoefficient} is far outside the 1-2 range real diodes occupy.`,
+        );
+      }
+      break;
+    }
+
+    case 'capacitor': {
+      requirePin('behavior.pinA', behavior.pinA, 'Capacitor');
+      requirePin('behavior.pinB', behavior.pinB, 'Capacitor');
+      if (behavior.pinA === behavior.pinB) {
+        error('behavior.pinB', 'Both plates are the same pin.');
+      }
+      // A farad in a breadboard part is a supercapacitor, and almost always microfarads written
+      // as farads -- the same unit slip that turns 20 mA into 20 A.
+      if (behavior.farads >= 1) {
+        warn('behavior.farads', `${behavior.farads} F is enormous. Microfarads read as farads?`);
+      }
       break;
     }
 
@@ -480,7 +531,9 @@ export function validateManifest(manifest: ComponentManifest): ValidationResult 
       warn('limits.pinMaxAmps', `${limits.pinMaxAmps} A per pin is high for a ${manifest.category}; worth checking.`);
     }
   }
-  if (limits.vccMaxVolts === undefined) {
+  // Only worth saying for a part that has a supply to exceed. A two-terminal passive has no rail,
+  // and demanding one produces a warning nobody can act on.
+  if (limits.vccMaxVolts === undefined && hasPower) {
     warn('limits.vccMaxVolts', 'No absolute maximum supply voltage, so over-voltage cannot be detected.');
   }
 

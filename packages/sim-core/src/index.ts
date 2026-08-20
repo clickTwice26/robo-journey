@@ -48,6 +48,7 @@ export {
   Bjt,
   Capacitor,
   CurrentSource,
+  DcSupply,
   DIODE_1N4148,
   Diode,
   Inductor,

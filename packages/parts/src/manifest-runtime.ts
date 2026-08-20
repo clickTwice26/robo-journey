@@ -8,6 +8,9 @@
  */
 import {
   Bjt,
+  Capacitor,
+  DcSupply,
+  Diode,
   GROUND,
   Led,
   LinearRegulator,
@@ -161,7 +164,7 @@ export class ManifestDevice implements Device {
   stamp(ctx: StampContext): void {
     // These devices own their terminals. Stamping generic pin models on top would hang stray
     // impedances off a gate or an op-amp input and skew every operating point.
-    const owned = ['transistor', 'mosfet', 'op-amp', 'potentiometer', 'regulator'];
+    const owned = ['transistor', 'mosfet', 'op-amp', 'potentiometer', 'regulator', 'diode', 'capacitor', 'source'];
     if (owned.includes(this.manifest.behavior.kind)) return;
 
     for (const pin of this.manifest.pins) this.stampPin(ctx, pin);
@@ -608,6 +611,47 @@ export function manifestToPartDefinition(
               // defensible stand-in, and it is present because the device physically has one.
               bodyDiode: { saturationCurrent: 1e-12, emissionCoefficient: 1.5, seriesResistance: 0.01 },
             },
+          ),
+        );
+      }
+
+      if (manifest.behavior.kind === 'diode') {
+        const behavior = manifest.behavior;
+        ctx.add(
+          new Diode(
+            ctx.partId,
+            nodes.get(behavior.anodePin) ?? GROUND,
+            nodes.get(behavior.cathodePin) ?? GROUND,
+            {
+              saturationCurrent: behavior.saturationCurrent,
+              emissionCoefficient: behavior.emissionCoefficient,
+              seriesResistance: behavior.seriesResistanceOhms,
+            },
+          ),
+        );
+      }
+
+      if (manifest.behavior.kind === 'capacitor') {
+        const behavior = manifest.behavior;
+        ctx.add(
+          new Capacitor(
+            ctx.partId,
+            nodes.get(behavior.pinA) ?? GROUND,
+            nodes.get(behavior.pinB) ?? GROUND,
+            behavior.farads,
+          ),
+        );
+      }
+
+      if (manifest.behavior.kind === 'source') {
+        const behavior = manifest.behavior;
+        ctx.add(
+          new DcSupply(
+            ctx.partId,
+            nodes.get(behavior.positivePin) ?? GROUND,
+            nodes.get(behavior.negativePin) ?? GROUND,
+            behavior.volts,
+            behavior.internalOhms,
           ),
         );
       }

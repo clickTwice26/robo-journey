@@ -408,6 +408,69 @@ export const BehaviorSchema = z.discriminatedUnion('kind', [
   }),
 
   /**
+   * A diode.
+   *
+   * After the resistor, the part that turns up in the most circuits: flyback across every relay
+   * and motor, reverse-polarity protection on every supply, rectification in every power stage.
+   * Simulated by the same Shockley model the LED uses, so a 1N4007 drops its real 0.7 V under load
+   * rather than an assumed one, and a signal diode drops less -- which is the entire reason anyone
+   * picks one over the other.
+   */
+  z.object({
+    kind: z.literal('diode'),
+    anodePin: z.string(),
+    cathodePin: z.string(),
+    /** Saturation current, amps. Around 1e-9 for a rectifier, 1e-12 for a small-signal part. */
+    saturationCurrent: z.number().positive().default(1e-9),
+    /** Emission coefficient N. Near 1 for a signal diode, closer to 2 for a power rectifier. */
+    emissionCoefficient: z.number().positive().default(1.5),
+    /** Bulk series resistance, ohms. What makes the forward drop grow with current. */
+    seriesResistanceOhms: Ohms.default(0.05),
+  }),
+
+  /**
+   * A capacitor.
+   *
+   * Modelled with a real companion model rather than ignored, so an RC delay takes the time it
+   * actually takes and a decoupling capacitor holds a rail up through a current spike. A simulator
+   * that treated capacitors as open circuits would get every timing circuit wrong and say nothing
+   * about it.
+   */
+  z.object({
+    kind: z.literal('capacitor'),
+    pinA: z.string(),
+    pinB: z.string(),
+    farads: z.number().positive(),
+    /** Working voltage. Exceeding it is how electrolytics fail, loudly. */
+    ratedVolts: Volts.optional(),
+    /** True for electrolytics and tantalums, which are destroyed by reverse polarity. */
+    polarised: z.boolean().default(false),
+  }),
+
+  /**
+   * A supply the user brings to the circuit: a battery, a cell, a bench supply.
+   *
+   * Modelled with its internal resistance, which is the only reason it is worth modelling at all.
+   * An ideal 9 V source makes every design work; a real 9 V alkaline is 1.7 ohm behind that EMF and
+   * sags to five volts under a stalled motor, and a simulator that hides this cannot explain why
+   * the servo project browns out on a battery and not on USB.
+   */
+  z.object({
+    kind: z.literal('source'),
+    positivePin: z.string(),
+    negativePin: z.string(),
+    /** Open-circuit terminal voltage, volts. */
+    volts: Volts,
+    /**
+     * Internal resistance, ohms.
+     *
+     * Datasheets for cells give it directly; for a battery pack it is roughly the cell figure times
+     * the number in series. A bench supply is a few milliohms and effectively ideal.
+     */
+    internalOhms: Ohms.default(0.5),
+  }),
+
+  /**
    * A three-terminal potentiometer.
    *
    * Not the same as `variable-resistor`, and the difference is what most beginner circuits depend
@@ -443,6 +506,7 @@ export const BehaviorSchema = z.discriminatedUnion('kind', [
 ]);
 
 export type Behavior = z.infer<typeof BehaviorSchema>;
+export type Register = z.infer<typeof RegisterSchema>;
 
 // ---------------------------------------------------------------------------------------------
 // Limits and provenance

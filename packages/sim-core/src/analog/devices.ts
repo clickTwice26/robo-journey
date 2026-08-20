@@ -190,6 +190,49 @@ export class CurrentSource implements Device {
 }
 
 /**
+ * A real supply: an EMF behind an internal resistance.
+ *
+ * Every battery has one, and it is the whole difference between a simulation that says a circuit
+ * works and a bench that says it does not. A 9 V alkaline is around 1.7 ohm internally, an AA about
+ * 0.15, a LiPo cell a few tens of milliohms; put a stalled motor across the alkaline and the
+ * terminal voltage collapses to five volts, which is exactly what happens in the hand and never in
+ * a simulator that models a battery as an ideal source.
+ *
+ * Stamped as its Norton equivalent rather than as a voltage source plus a series resistor, which
+ * needs no branch unknown and no internal node -- the same circuit, one row smaller.
+ */
+export class DcSupply implements Device {
+  readonly branchCount = 0;
+  readonly internalNodeCount = 0;
+  readonly nonlinear = false;
+  branchOffset = 0;
+  internalNodeOffset = -1;
+  readonly nodes: readonly number[];
+
+  constructor(
+    readonly id: string,
+    /** Positive terminal. */
+    private readonly a: number,
+    /** Negative terminal. */
+    private readonly b: number,
+    public volts: number,
+    public internalOhms: number,
+  ) {
+    this.nodes = [a, b];
+  }
+
+  stamp(ctx: StampContext): void {
+    const g = 1 / this.internalOhms;
+    ctx.mna.stampNorton(this.a, this.b, g, this.volts * ctx.sourceScale * g);
+  }
+
+  /** Current delivered, positive when the supply is sourcing. */
+  currentDelivered(mna: MnaSystem): number {
+    return (this.volts - (mna.voltage(this.a) - mna.voltage(this.b))) / this.internalOhms;
+  }
+}
+
+/**
  * An ideal-ish switch: a resistance that flips between two values.
  *
  * Modelled as a resistor rather than a true short so the matrix stays well conditioned. A closed
