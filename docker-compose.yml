@@ -33,9 +33,11 @@ services:
       timeout: 3s
       retries: 10
       start_period: 10s
-    # Not published by default. The database is reachable from the service over the compose
-    # network and has no business being on the host's interfaces; uncomment for a psql session.
-    # ports: ["28632:5432"]
+    ports:
+      # Loopback only. The service reaches this over the compose network when it runs in a
+      # container; this is here so it can also be reached by a service running in a terminal,
+      # which is the normal way to work on the backend.
+      - "127.0.0.1:28632:5432"
 
   redis:
     image: redis:8-alpine
@@ -54,8 +56,14 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    ports:
+      - "127.0.0.1:28633:6379"
 
   service:
+    # Behind a profile, so `docker compose up` starts only Postgres and Redis and leaves port
+    # 28610 to a service running in a terminal -- which is how the backend is normally worked on.
+    # `docker compose --profile packaged up` runs the built image instead.
+    profiles: ["packaged"]
     build:
       context: .
       dockerfile: Dockerfile

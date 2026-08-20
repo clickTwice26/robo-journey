@@ -28,12 +28,14 @@
     "dev": "npm run dev -w @robo-journey/studio",
     "service": "node --env-file-if-exists=.env packages/compile-service/dist/main.js",
     "settle": "node -e \"setTimeout(() => {}, 2500)\"",
-    "stack": "docker compose up --build",
+    "stack": "docker compose --profile packaged up --build",
     "stack:down": "docker compose down",
-    "stack:logs": "docker compose logs -f service",
-    "stack:dev": "docker compose -f docker-compose.dev.yml up -d",
-    "stack:dev:down": "docker compose -f docker-compose.dev.yml down",
-    "import:sqlite": "npm run build -w @robo-journey/accounts && node --env-file-if-exists=.env packages/accounts/dist/import-sqlite.js"
+    "stack:logs": "docker compose --profile packaged logs -f service",
+    "import:sqlite": "npm run build -w @robo-journey/accounts && node --env-file-if-exists=.env packages/accounts/dist/import-sqlite.js",
+    "infra": "docker compose up -d postgres redis",
+    "infra:down": "docker compose stop postgres redis",
+    "dev:service": "npm run build && node --env-file=.env --watch packages/compile-service/dist/main.js",
+    "watch": "tsc --build --watch packages/sim-core packages/parts packages/datasheet packages/assistant packages/accounts packages/compile-service"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

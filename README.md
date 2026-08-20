@@ -71,13 +71,15 @@ Then open http://localhost:28610, create an account, pick **Examples → Blink a
 **Build & Run**. The service serves the studio and the API from one origin, so there is no proxy to
 configure. See [DEPLOYMENT.md](DEPLOYMENT.md) for what runs where and why.
 
-For day-to-day work, run only the backing services and keep Vite's feedback loop:
+For day-to-day work, keep the database and cache in containers -- they are infrastructure and never
+change -- and run the service and the studio in terminals, where a restart is a second rather than
+several minutes:
 
 ```bash
 npm install
-docker compose -f docker-compose.dev.yml up -d   # postgres + redis
-npm run service                                  # in one terminal
-npm run dev                                      # in another
+npm run infra          # postgres + redis
+npm run dev:service    # the service, restarting on change
+npm run dev            # the studio
 ```
 
 That puts the app on http://localhost:28611. The ports sit well away from the crowded defaults so

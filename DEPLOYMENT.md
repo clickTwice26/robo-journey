@@ -32,17 +32,31 @@ turns one bad minute from Postgres into a crash loop across every instance.
 
 ## Developing
 
-The full image takes a few minutes to build, so day to day run only the backing services and keep
-the fast feedback of Vite:
+The image takes minutes to build, so nothing that changes often should be inside it. Day to day,
+Postgres and Redis run in containers -- they are infrastructure and never change -- and the service
+and the studio run in terminals where a restart is a second.
 
 ```bash
-docker compose -f docker-compose.dev.yml up -d   # postgres + redis
-npm run service                                  # in one terminal
-npm run dev                                      # in another
+npm run infra          # postgres + redis, in the background
+npm run dev:service    # the service, in one terminal, restarting on change
+npm run dev            # the studio, in another
 ```
 
-`npm run service` needs `DATABASE_URL` and `REDIS_URL`; the commented lines at the bottom of
-`.env.example` match what the dev compose file publishes.
+Then open <http://localhost:28611>. Vite serves the studio and proxies `/api` to the service.
+
+`npm run dev:service` reads `DATABASE_URL` and `REDIS_URL` from `.env`, pointing at the ports
+Compose publishes on loopback (28632 and 28633). It builds first, then watches -- so a change to
+any package is picked up by re-running `npm run build`, or by leaving `npm run watch` going in a
+third terminal for continuous compilation.
+
+The packaged service is behind a Compose profile so it does not compete for port 28610:
+
+```bash
+npm run stack          # docker compose --profile packaged up --build
+```
+
+That is the deployment artifact and the thing to test before a release; it is not the thing to
+iterate in.
 
 ## Coming from the SQLite build
 
