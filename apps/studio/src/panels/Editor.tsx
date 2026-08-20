@@ -6,6 +6,8 @@
  */
 import Editor, { type Monaco } from '@monaco-editor/react';
 import { Box } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
+import { editorTheme } from '../theme.ts';
 import { useEffect, useRef } from 'react';
 import type { editor } from 'monaco-editor';
 import { useStudio } from '../store.ts';
@@ -13,6 +15,7 @@ import { useStudio } from '../store.ts';
 const MAIN_FILE = 'sketch.ino';
 
 export function EditorPanel() {
+  const mode = useTheme().palette.mode;
   const project = useStudio((s) => s.project);
   const diagnostics = useStudio((s) => s.diagnostics);
   const setSketch = useStudio((s) => s.setSketch);
@@ -53,7 +56,7 @@ export function EditorPanel() {
       <Editor
         height="100%"
         defaultLanguage="cpp"
-        theme="vs-dark"
+        theme={editorTheme(mode)}
         value={contents}
         onChange={(value) => setSketch(MAIN_FILE, value ?? '')}
         onMount={(instance, monaco) => {

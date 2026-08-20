@@ -6,7 +6,11 @@ body,
   overflow: hidden;
 }
 
-/* dockview ships light defaults; align its chrome with the MUI dark theme. */
+/*
+ * dockview is styled by CSS variables rather than by the MUI theme, so both palettes are stated
+ * here and selected by the `data-theme` the app puts on the root element. The dark set is the
+ * default so there is no flash of the wrong chrome before the script runs.
+ */
 .dockview-theme-abyss {
   --dv-background-color: #14161a;
   --dv-group-view-background-color: #1b1e24;
@@ -17,4 +21,17 @@ body,
   --dv-separator-border: #2a2f38;
   --dv-paneview-header-border-color: #2a2f38;
   height: 100%;
+}
+
+:root[data-theme='light'] .dockview-theme-abyss {
+  --dv-background-color: #eef0f4;
+  --dv-group-view-background-color: #ffffff;
+  --dv-tabs-and-actions-container-background-color: #e4e7ed;
+  --dv-activegroup-visiblepanel-tab-background-color: #ffffff;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #e4e7ed;
+  --dv-tab-divider-color: #d9dee6;
+  --dv-separator-border: #d9dee6;
+  --dv-paneview-header-border-color: #d9dee6;
+  --dv-activegroup-visiblepanel-tab-color: #1a1d23;
+  --dv-inactivegroup-visiblepanel-tab-color: #5a6371;
 }

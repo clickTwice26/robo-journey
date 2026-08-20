@@ -60,7 +60,13 @@ interface StimulusProps {
   readonly selected: boolean;
 }
 
-/** The half-strength ring, drawn only for the selection so the canvas is not full of circles. */
+/**
+ * The half-strength ring, drawn only for the selection so the canvas is not full of circles.
+ *
+ * Its colour is interface chrome rather than part of the object, which is why the caller passes a
+ * mid-tone rather than the bright fill the icon uses: the ring is drawn straight onto the
+ * workspace and has to be legible whether that ground is dark or light.
+ */
 function Reach({ part, selected, color }: StimulusProps & { color: string }) {
   // The definition's own default, not a generic one: a sound source reaches 50 mm and a magnet 15,
   // and drawing 30 for both until someone touches the slider would make the ring a lie.
@@ -76,9 +82,10 @@ function Reach({ part, selected, color }: StimulusProps & { color: string }) {
         y={definitionSize / 2}
         radius={mm(reach)}
         stroke={color}
-        strokeWidth={1}
+        strokeWidth={1.2}
         dash={[4, 4]}
-        opacity={0.5}
+        // Mid-tones at half opacity vanish on a light ground; this reads on both.
+        opacity={0.75}
       />
       <Text
         x={definitionSize / 2 - 40}
@@ -88,7 +95,7 @@ function Reach({ part, selected, color }: StimulusProps & { color: string }) {
         text={`half at ${reach} mm`}
         fontSize={6}
         fill={color}
-        opacity={0.7}
+        opacity={0.95}
       />
     </Group>
   );
@@ -143,7 +150,7 @@ export function FlameShape({ part, selected }: StimulusProps) {
   const h = mm(14);
 
   return (
-    <Base part={part} selected={selected} color="#ff7a3d">
+    <Base part={part} selected={selected} color="#e8590c">
       <Group x={h / 2} y={h} scaleY={1 + wobble} scaleX={1 - wobble * 0.5}>
         {/* Outer flame. */}
         <Path
@@ -164,7 +171,7 @@ export function LampShape({ part, selected }: StimulusProps) {
   const c = mm(14) / 2;
 
   return (
-    <Base part={part} selected={selected} color="#ffe08a">
+    <Base part={part} selected={selected} color="#e6a817">
       {on &&
         // Rays, drawn as short spokes rather than a glow: a glow on a dark canvas turns into a
         // smudge, and spokes read as "this is emitting" at any zoom.
@@ -197,7 +204,7 @@ export function SoundShape({ part, selected }: StimulusProps) {
   const step = Math.floor(phase * 4) % 3;
 
   return (
-    <Base part={part} selected={selected} color="#7ec8ff">
+    <Base part={part} selected={selected} color="#1c7ed6">
       <Rect x={c - 12} y={c - 8} width={8} height={16} fill="#5b6472" cornerRadius={1} />
       <Path data={`M ${c - 4} ${c - 8} L ${c + 4} ${c - 15} L ${c + 4} ${c + 15} L ${c - 4} ${c + 8} Z`} fill="#8f98a5" />
       {on &&
@@ -222,7 +229,7 @@ export function HeatShape({ part, selected }: StimulusProps) {
   const c = mm(14) / 2;
 
   return (
-    <Base part={part} selected={selected} color="#ff9d6b">
+    <Base part={part} selected={selected} color="#f76707">
       <Circle x={c} y={c + 4} radius={9} fill="#c0563a" />
       <Circle x={c} y={c + 4} radius={5} fill="#ff9d6b" />
       {/* Rising heat: three wavy lines drifting upward. */}
@@ -251,21 +258,21 @@ export function MotionShape({ part, selected }: StimulusProps) {
   const sway = on ? Math.sin(phase * 6) * 3 : 0;
 
   return (
-    <Base part={part} selected={selected} color="#9ae6a0">
+    <Base part={part} selected={selected} color="#2f9e44">
       <Group x={sway}>
         {/* A walking figure: head, body, two legs mid-stride. */}
-        <Circle x={c} y={c - 10} radius={4} fill="#9ae6a0" />
-        <Line points={[c, c - 6, c, c + 3]} stroke="#9ae6a0" strokeWidth={2.4} lineCap="round" />
-        <Line points={[c, c + 3, c - 5, c + 12]} stroke="#9ae6a0" strokeWidth={2.2} lineCap="round" />
-        <Line points={[c, c + 3, c + 5, c + 12]} stroke="#9ae6a0" strokeWidth={2.2} lineCap="round" />
-        <Line points={[c - 5, c - 3, c + 5, c - 1]} stroke="#9ae6a0" strokeWidth={2} lineCap="round" />
+        <Circle x={c} y={c - 10} radius={4} fill="#37b24d" />
+        <Line points={[c, c - 6, c, c + 3]} stroke="#37b24d" strokeWidth={2.4} lineCap="round" />
+        <Line points={[c, c + 3, c - 5, c + 12]} stroke="#37b24d" strokeWidth={2.2} lineCap="round" />
+        <Line points={[c, c + 3, c + 5, c + 12]} stroke="#37b24d" strokeWidth={2.2} lineCap="round" />
+        <Line points={[c - 5, c - 3, c + 5, c - 1]} stroke="#37b24d" strokeWidth={2} lineCap="round" />
       </Group>
       {on &&
         [0, 1].map((i) => (
           <Line
             key={i}
             points={[c - 14 - i * 4, c - 2, c - 20 - i * 4, c - 2]}
-            stroke="#9ae6a0"
+            stroke="#37b24d"
             strokeWidth={1.4}
             opacity={0.5 - i * 0.2}
             listening={false}
@@ -279,7 +286,7 @@ export function MotionShape({ part, selected }: StimulusProps) {
 export function ObstacleShape({ part, selected }: StimulusProps) {
   const size = mm(16);
   return (
-    <Base part={part} selected={selected} color="#b9c2cf">
+    <Base part={part} selected={selected} color="#868e96">
       <Rect width={size} height={size} fill="#4c5665" cornerRadius={2} />
       {/* Brick courses, so it reads as a wall and not as a component body. */}
       {[0, 1, 2].map((r) => (
@@ -308,7 +315,7 @@ export function ObstacleShape({ part, selected }: StimulusProps) {
 export function MagnetShape({ part, selected }: StimulusProps) {
   const c = mm(12) / 2;
   return (
-    <Base part={part} selected={selected} color="#ff8a8a">
+    <Base part={part} selected={selected} color="#e03131">
       <Path
         data={`M ${c - 10} ${c + 10} L ${c - 10} ${c - 2} A 10 10 0 0 1 ${c + 10} ${c - 2} L ${c + 10} ${c + 10} L ${c + 4} ${c + 10} L ${c + 4} ${c - 2} A 4 4 0 0 0 ${c - 4} ${c - 2} L ${c - 4} ${c + 10} Z`}
         fill="#8f98a5"
@@ -323,7 +330,7 @@ export function MagnetShape({ part, selected }: StimulusProps) {
 export function WaterShape({ part, selected }: StimulusProps) {
   const c = mm(14) / 2;
   return (
-    <Base part={part} selected={selected} color="#6fb8ff">
+    <Base part={part} selected={selected} color="#1c7ed6">
       <Path
         data={`M ${c} ${c - 12} C ${c + 10} ${c - 2} ${c + 8} ${c + 10} ${c} ${c + 10} C ${c - 8} ${c + 10} ${c - 10} ${c - 2} ${c} ${c - 12} Z`}
         fill="#3f8fd8"
@@ -341,7 +348,7 @@ export function ShakerShape({ part, selected }: StimulusProps) {
   const jitter = on ? Math.sin(phase * 40) * 2.5 : 0;
 
   return (
-    <Base part={part} selected={selected} color="#e0b0ff">
+    <Base part={part} selected={selected} color="#7048e8">
       <Group x={jitter}>
         <Rect x={c - 7} y={c - 7} width={14} height={14} fill="#8a5fb0" cornerRadius={2} />
         <Circle x={c} y={c} radius={3} fill="#e0b0ff" />

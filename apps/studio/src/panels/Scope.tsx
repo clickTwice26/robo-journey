@@ -23,15 +23,11 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
+import { useTheme } from '@mui/material/styles';
+import { scopeChrome, scopeTraceColors } from '../theme.ts';
 import { useStudio } from '../store.ts';
 import type { DecodedFrame, TraceData } from '../sim/protocol.ts';
 import type { SimulationController } from '../sim/useSimulation.ts';
-
-/** Trace colours, chosen to stay distinguishable on the dark theme. */
-const COLORS = [
-  '#4da3ff', '#3ecf8e', '#f5a524', '#ff5c5c',
-  '#b388ff', '#4dd0e1', '#ffd54f', '#f06292',
-];
 
 /** Time spans the user can choose from, seconds. */
 const SPANS = [0.001, 0.01, 0.05, 0.2, 1, 2, 5];
@@ -40,6 +36,11 @@ export function ScopePanel({ sim }: { sim: SimulationController }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const running = useStudio((s) => s.snapshot.running);
+  // Axes and graticule follow the theme; the trace colours do not. A channel that changed colour
+  // would break the one thing a scope's colours are for.
+  const mode = useTheme().palette.mode;
+  const chrome = scopeChrome(mode);
+  const COLORS = scopeTraceColors(mode);
   const simTime = useStudio((s) => s.snapshot.time);
 
   const [selected, setSelected] = useState<string[]>(['digital:D13']);
@@ -131,7 +132,9 @@ export function ScopePanel({ sim }: { sim: SimulationController }) {
     });
 
     return { times, series };
-  }, [traces]);
+    // COLORS is in here because it changes with the theme, and a memo that ignored it would keep
+    // handing the plot the previous palette's traces forever.
+  }, [traces, COLORS]);
 
   // Build the plot once, then feed it data. Recreating uPlot each frame would thrash the canvas.
   useEffect(() => {
@@ -151,12 +154,12 @@ export function ScopePanel({ sim }: { sim: SimulationController }) {
       legend: { show: false },
       axes: [
         {
-          stroke: '#9aa4b2',
-          grid: { stroke: '#242a33' },
-          ticks: { stroke: '#242a33' },
+          stroke: chrome.axis,
+          grid: { stroke: chrome.grid },
+          ticks: { stroke: chrome.grid },
           values: (_u, splits) => splits.map((v) => `${(v * 1000).toFixed(1)} ms`),
         },
-        { stroke: '#9aa4b2', grid: { stroke: '#242a33' }, ticks: { stroke: '#242a33' } },
+        { stroke: chrome.axis, grid: { stroke: chrome.grid }, ticks: { stroke: chrome.grid } },
       ],
       series: [
         {},
@@ -181,8 +184,15 @@ export function ScopePanel({ sim }: { sim: SimulationController }) {
       plotRef.current?.destroy();
       plotRef.current = null;
     };
-    // Rebuild when the *shape* changes; data-only updates go through setData below.
-  }, [plotData?.series.length, plotData?.series.map((s) => s.trace.id).join(',')]);
+    // Rebuild when the *shape* changes; data-only updates go through setData below. The theme is
+    // in here because uPlot bakes its axis colours into the options at construction, so a plot
+    // built dark stays dark until something replaces it.
+  }, [
+    plotData?.series.length,
+    plotData?.series.map((s) => s.trace.id).join(','),
+    chrome.axis,
+    chrome.grid,
+  ]);
 
   useEffect(() => {
     if (!plotRef.current || !plotData) return;

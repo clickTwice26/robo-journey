@@ -12,7 +12,8 @@
 import { CssBaseline, ThemeProvider } from '@mui/material';
 import { Studio } from './Studio.tsx';
 import { AccessGate, ResetLanding, VerifyLanding } from './panels/AccessGate.tsx';
-import { theme } from './theme.ts';
+import { applyCanvasPalette, buildTheme } from './theme.ts';
+import { useThemeMode } from './useThemeMode.ts';
 import { useAccess } from './useAccess.ts';
 import { useStudio } from './store.ts';
 import { useEffect, useState } from 'react';
@@ -33,6 +34,19 @@ function emailLanding(): { kind: 'verify' | 'reset'; token: string | null } | nu
 
 export function App() {
   const gate = useAccess();
+  const themeControl = useThemeMode();
+
+  // Applied during render rather than in an effect: the Konva tree reads these colours as it
+  // builds, and an effect runs after the first paint -- which would show one frame of the previous
+  // theme every time the app starts or the system setting flips.
+  applyCanvasPalette(themeControl.mode);
+
+  // dockview is styled by CSS variables rather than by the MUI theme, so the mode has to reach the
+  // stylesheet as well.
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeControl.mode;
+    document.documentElement.style.colorScheme = themeControl.mode;
+  }, [themeControl.mode]);
   // Captured once rather than watched: both screens rewrite the URL as soon as they have spent
   // their token, and re-reading it afterwards would send them back to a landing with nothing left
   // to do.
@@ -48,14 +62,14 @@ export function App() {
   }, [gate.user]);
 
   return (
-    <ThemeProvider theme={theme}>
+    <ThemeProvider theme={buildTheme(themeControl.mode)}>
       <CssBaseline />
       {landing?.kind === 'verify' ? (
         <VerifyLanding gate={gate} token={landing.token} onDone={() => setLanding(null)} />
       ) : landing?.kind === 'reset' ? (
         <ResetLanding gate={gate} token={landing.token} onDone={() => setLanding(null)} />
       ) : gate.phase === 'active' ? (
-        <Studio gate={gate} />
+        <Studio gate={gate} theme={themeControl} />
       ) : (
         <AccessGate gate={gate} />
       )}

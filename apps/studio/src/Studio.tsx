@@ -37,6 +37,7 @@ import { DatasheetDialog } from './panels/DatasheetDialog.tsx';
 import { CloudProjectsDialog } from './panels/CloudProjectsDialog.tsx';
 import { LibraryDialog } from './panels/LibraryDialog.tsx';
 import { useBuzzerAudio } from './sim/useAudio.ts';
+import type { ThemeControl } from './useThemeMode.ts';
 import { restoreLibrary } from './library.ts';
 import type { AccessGate as Gate } from './useAccess.ts';
 import { AUTOSAVE_DELAY_MS, saveWorkspace } from './persistence.ts';
@@ -84,7 +85,7 @@ function IdleWarning({ remaining }: { remaining: number | null }) {
 /** Titles by panel id, so a closed panel can be recreated with the name it had. */
 const PANEL_TITLES = new Map<string, string>(PANELS.map((panel) => [panel.id, panel.title]));
 
-export function Studio({ gate }: { gate: Gate }) {
+export function Studio({ gate, theme }: { gate: Gate; theme: ThemeControl }) {
   const sim = useSimulation();
   const apiRef = useRef<DockviewApi | null>(null);
   const [datasheetOpen, setDatasheetOpen] = useState(false);
@@ -319,6 +320,7 @@ export function Studio({ gate }: { gate: Gate }) {
           sim={sim}
           actions={menuActions}
           gate={gate}
+          theme={theme}
           onOpenDatasheet={() => setDatasheetOpen(true)}
           onOpenCloudProjects={() => setCloudOpen(true)}
           onOpenLibrary={() => setLibraryOpen(true)}

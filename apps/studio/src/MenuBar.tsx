@@ -35,6 +35,9 @@ import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import CollectionsBookmarkIcon from '@mui/icons-material/CollectionsBookmark';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import VolumeOffIcon from '@mui/icons-material/VolumeOff';
+import LightModeIcon from '@mui/icons-material/LightMode';
+import DarkModeIcon from '@mui/icons-material/DarkMode';
+import SettingsBrightnessIcon from '@mui/icons-material/SettingsBrightness';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import PauseIcon from '@mui/icons-material/Pause';
@@ -53,6 +56,8 @@ import CloudOffIcon from '@mui/icons-material/CloudOff';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import LogoutIcon from '@mui/icons-material/Logout';
 import { emptyProject } from '@robo-journey/parts';
+import type { ThemeControl } from './useThemeMode.ts';
+import type { ThemePreference } from './theme.ts';
 import { compileSketch, CompileUnavailableError } from './api.ts';
 import { createProject, saveProject } from './auth.ts';
 import type { AccessGate } from './useAccess.ts';
@@ -125,6 +130,7 @@ interface Props {
   onOpenDatasheet(): void;
   onOpenCloudProjects(): void;
   onOpenLibrary(): void;
+  theme: ThemeControl;
   /** The seat this session is running on, for the countdown and for signing out. */
   gate: AccessGate;
 }
@@ -135,6 +141,7 @@ export function MenuBar({
   onOpenDatasheet,
   onOpenCloudProjects,
   onOpenLibrary,
+  theme,
   gate,
 }: Props) {
   const project = useStudio((s) => s.project);
@@ -408,6 +415,26 @@ export function MenuBar({
             onClick: () => actions?.showPanel(panel.id),
           })),
           { divider: true },
+          // Three choices, not a toggle: "dark" and "whatever my system is doing" are different
+          // answers, and a two-state switch silently turns the second into the first.
+          ...(
+            [
+              { value: 'light', label: 'Light', icon: <LightModeIcon fontSize="small" /> },
+              { value: 'dark', label: 'Dark', icon: <DarkModeIcon fontSize="small" /> },
+              { value: 'system', label: 'Match system', icon: <SettingsBrightnessIcon fontSize="small" /> },
+            ] as const
+          ).map((option) => ({
+            label: option.label,
+            icon: option.icon,
+            secondary:
+              theme.preference === option.value
+                ? option.value === 'system'
+                  ? `in use · currently ${theme.mode}`
+                  : 'in use'
+                : undefined,
+            onClick: () => theme.setPreference(option.value as ThemePreference),
+          })),
+          { divider: true },
           { label: 'Reset layout', icon: <RestartAltIcon fontSize="small" />, onClick: () => actions?.resetLayout() },
         ],
       },
@@ -481,7 +508,7 @@ export function MenuBar({
     [
       actions, build, buildAndRun, cloudProjectId, close, future.length, hex,
       canvasControls, newProject, onOpenCloudProjects, onOpenDatasheet, onOpenLibrary, past.length, save,
-      saveToAccount, selection, signOut, sim, snapshot.running, unplugSelection, user,
+      saveToAccount, selection, signOut, sim, snapshot.running, theme, unplugSelection, user,
     ],
   );
 

@@ -10,12 +10,15 @@ import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
+import { useTheme } from '@mui/material/styles';
+import { terminalTheme } from '../theme.ts';
 import { useStudio } from '../store.ts';
 
 export function SerialPanel() {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const serial = useStudio((s) => s.snapshot.serial);
+  const mode = useTheme().palette.mode;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -23,7 +26,7 @@ export function SerialPanel() {
     const terminal = new Terminal({
       fontSize: 12,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-      theme: { background: '#14161a', foreground: '#e6e9ef', cursor: '#4da3ff' },
+      theme: terminalTheme(mode),
       convertEol: true,
       scrollback: 5000,
     });
@@ -43,6 +46,10 @@ export function SerialPanel() {
       terminalRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (terminalRef.current) terminalRef.current.options.theme = terminalTheme(mode);
+  }, [mode]);
 
   // The snapshot delivers whatever the USART sent since the last poll, then clears it.
   useEffect(() => {
