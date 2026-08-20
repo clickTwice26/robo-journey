@@ -52,6 +52,7 @@ export {
   Diode,
   Inductor,
   Led,
+  LinearRegulator,
   MOSFET_2N7000,
   MOSFET_IRLZ44N,
   Mosfet,
@@ -59,6 +60,8 @@ export {
   OPAMP_RAIL_TO_RAIL,
   OpAmp,
   Potentiometer,
+  REGULATOR_7805,
+  REGULATOR_AMS1117_33,
   Resistor,
   Switch,
   VoltageSource,
@@ -68,12 +71,14 @@ export type {
   BjtModel,
   BjtPolarity,
   Device,
+  DeviceReadout,
   DiodeModel,
   IntegrationMethod,
   LedColor,
   MosfetChannel,
   MosfetModel,
   OpAmpModel,
+  RegulatorModel,
   StampContext,
 } from './analog/devices.js';
 
@@ -94,7 +99,7 @@ export {
 } from './mcu/pin-model.js';
 export type { LogicLevel } from './mcu/pin-model.js';
 
-export { fault, formatCurrent, formatVoltage } from './faults/index.js';
+export { fault, formatCurrent, formatPower, formatTemperature, formatVoltage } from './faults/index.js';
 export type { Fault, FaultCode, FaultSeverity } from './faults/index.js';
 
 // --- Netlist and breadboard topology ------------------------------------------------------------
@@ -155,4 +160,18 @@ export { DATA_SPACE, IO_SPACE, dataName, ioName } from './debug/io-registers.js'
 // --- Buses --------------------------------------------------------------------------------------
 
 export { I2cBus, RegisterFilePeripheral } from './bus/i2c.js';
-export type { I2cPeripheral, I2cTransfer, RegisterSpec, TwiHost } from './bus/i2c.js';
+export type { I2cPeripheral, I2cTransfer, TwiHost } from './bus/i2c.js';
+
+export { RegisterFile } from './bus/registers.js';
+export type { RegisterSpec } from './bus/registers.js';
+
+export { SpiBus, SpiRegisterPeripheral } from './bus/spi.js';
+export type {
+  SpiAddressing,
+  SpiAttachment,
+  SpiHost,
+  SpiPeripheral,
+  SpiProtocolIssue,
+  SpiRegisterOptions,
+  SpiTransfer,
+} from './bus/spi.js';

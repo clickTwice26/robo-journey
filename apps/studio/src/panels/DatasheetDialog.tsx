@@ -30,21 +30,20 @@ import {
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  manifestToPartDefinition,
-  parseManifest,
-  registerPart,
-  type ComponentManifest,
-} from '@robo-journey/parts';
+import { parseManifest, type ComponentManifest } from '@robo-journey/parts';
 import { datasheetStatus, extractComponent, type ExtractIssue } from '../api.ts';
+import { addManifest } from '../library.ts';
+import type { SimulationController } from '../sim/useSimulation.ts';
 
 interface Props {
   open: boolean;
   onClose(): void;
   onAdded(manifest: ComponentManifest): void;
+  /** Needed so a newly extracted part reaches the worker's registry as well as this thread's. */
+  sim: SimulationController;
 }
 
-export function DatasheetDialog({ open, onClose, onAdded }: Props) {
+export function DatasheetDialog({ open, onClose, onAdded, sim }: Props) {
   const [mode, setMode] = useState<'text' | 'pdf'>('text');
   const [text, setText] = useState('');
   const [hint, setHint] = useState('');
@@ -104,13 +103,15 @@ export function DatasheetDialog({ open, onClose, onAdded }: Props) {
   const add = useCallback(() => {
     if (!manifest) return;
     try {
-      registerPart(manifestToPartDefinition(manifest));
+      // Through the library, so the worker gets it too and it survives a reload. Registering it
+      // here alone would give a part that draws and wires and then fails to simulate.
+      addManifest(sim, manifest);
       onAdded(manifest);
       onClose();
     } catch (caught) {
       setError((caught as Error).message);
     }
-  }, [manifest, onAdded, onClose]);
+  }, [manifest, onAdded, onClose, sim]);
 
   const canExtract = !busy && (mode === 'text' ? text.trim().length > 40 : pdf !== null);
 

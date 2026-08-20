@@ -41,6 +41,8 @@ export {
 } from './project.js';
 export type { PartInstance, Project, SketchFile, Wire } from './project.js';
 
+export { BUILTIN_MANIFESTS, installBuiltinManifests } from './builtin-manifests.js';
+
 export { EXAMPLES, exampleById } from './examples.js';
 export type { Example } from './examples.js';
 

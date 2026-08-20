@@ -22,7 +22,7 @@
  */
 
 /** Bumped whenever the prompt changes materially, and recorded in provenance. */
-export const PROMPT_VERSION = 3;
+export const PROMPT_VERSION = 4;
 
 export const SYSTEM_INSTRUCTION = `
 You extract electronic component models from datasheets for a circuit simulator that runs real
@@ -114,7 +114,37 @@ BEHAVIOR is exactly one of:
                      "fromState": "stateName", "scale": n, "offset": n, "bytes": 1 } ] }
 
   { "kind": "spi-peripheral", "mosiPin": "...", "misoPin": "...", "sckPin": "...", "csPin": "...",
-    "mode": 0-3, "registers": [ ... ] }
+    "mode": 0-3, "csActiveLow": bool, "bitOrder": "msbFirst"|"lsbFirst", "maxClockHz": Hz,
+    "addressing": "register"|"stream", "readBitPosition": 0-7, "readBitValue": 0|1,
+    "autoIncrement": bool, "registers": [ ... ] }
+      // mode comes from CPOL and CPHA in the timing section: CPOL 0 / CPHA 0 is mode 0,
+      // 0/1 is mode 1, 1/0 is mode 2, 1/1 is mode 3. Getting this wrong produces a part that
+      // simulates as returning nothing, so read it from the timing diagram rather than guessing.
+      // maxClockHz is the SCK frequency limit from the AC characteristics -- 10 MHz, not 10.
+      // addressing: "register" for the usual command byte carrying a read/write flag plus a
+      // register address (nearly every sensor). "stream" for parts with no register map at all,
+      // such as shift registers and graphic displays.
+      // readBitPosition / readBitValue describe that command byte: which bit is the flag and
+      // which value of it means read. Most parts use bit 7 with 1 meaning read; some invert it.
+      // Take this from the datasheet's serial-interface section, not from a similar part.
+
+  { "kind": "regulator",
+    "inputPin": "NAME", "outputPin": "NAME", "groundPin": "NAME",
+    "outputVolts": V, "dropoutVolts": V, "quiescentAmps": A, "maxOutputAmps": A,
+    "outputImpedanceOhms": R, "thermalOhmsPerWatt": n, "thermalShutdownC": n,
+    "thermalMassJPerK": n }
+      // 7805, LM317, AMS1117, LM1117, MCP1700 and every other three-terminal linear regulator.
+      // dropoutVolts is the headroom the part needs ABOVE its output, not its maximum input.
+      // A 78xx needs about 2 V, an AMS1117 about 1.1 V, a modern LDO 0.2 V or less. This single
+      // number decides whether a battery-powered design works at all, so take it from the dropout
+      // voltage specification and not from the input voltage range.
+      // quiescentAmps is the ground-pin or quiescent current: 5 mA is 0.005, not 5.
+      // thermalOhmsPerWatt is the junction-to-AMBIENT figure (RthJA), not junction-to-case.
+      // Roughly 65 for a bare TO-220, 110 for SOT-223, 200+ for SOT-23. If the datasheet gives
+      // only junction-to-case, use the free-air figure for the package and say so in unresolved.
+      // outputImpedanceOhms comes from the load regulation spec; 0.02 is a fair default.
+      // thermalMassJPerK is on no datasheet -- 0.9 for TO-220, 0.15 for SOT-223, 0.02 for SOT-23.
+      // It only sets how long overheating takes, not whether it happens, so assume and move on.
 
   { "kind": "pulse-echo", "triggerPin": "NAME", "echoPin": "NAME", "state": "stateName",
     "minTriggerSeconds": s, "responseDelaySeconds": s, "secondsPerUnit": s, "timeoutSeconds": s }
@@ -190,9 +220,16 @@ CHOOSING A BEHAVIOUR. Ask about the part, not about the list:
   Does it have a gate, drain and source?                              -> mosfet
   Does it have two inputs, an output, and enormous gain?              -> op-amp
   Is it a three-terminal pot with a wiper?                            -> potentiometer
+  Does it take an unregulated input and hold an output voltage fixed?  -> regulator
   Is it only resistors, capacitors, diodes or LEDs?                   -> passive
 If the part genuinely fits none of these, pick the closest, set confidence below 0.5, and say so in
 unresolved.
+
+REGULATORS. Never model one as a fixed voltage source or as "passive". The whole reason to
+simulate a regulator is that it stops working in two specific ways -- it runs out of input voltage,
+and it overheats -- and both of those are decided by numbers on its datasheet. A regulator
+extracted without a dropout voltage and a thermal resistance is worse than no regulator at all,
+because it makes an under-powered or over-loaded design look correct.
 
 DISCRETE SEMICONDUCTORS. A transistor has no state variable and no protocol -- it amplifies. Use
 the transistor archetype rather than forcing it into "passive": a passive approximation cannot

@@ -9,7 +9,7 @@
 import * as Comlink from 'comlink';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { ChannelSpec, DisasmLine } from '@robo-journey/sim-core';
-import type { Project } from '@robo-journey/parts';
+import type { ComponentManifest, Project } from '@robo-journey/parts';
 import { useStudio } from '../store.ts';
 import type { DecodedFrame, McuState, SimApi, TraceData } from './protocol.ts';
 
@@ -34,6 +34,8 @@ export interface SimulationController {
   stepInstruction(): void;
   stepTime(seconds: number): void;
   load(project: Project, hex: string): void;
+  /** Teach the worker about a manifest-described part. See `library.ts`. */
+  registerManifest(manifest: ComponentManifest): void;
   setPartProp(partId: string, key: string, value: unknown): void;
 
   // Queries. These return promises because the engine lives in a worker.
@@ -145,6 +147,7 @@ export function useSimulation(): SimulationController {
       lastFingerprint.current = circuitFingerprint(loaded);
       call('load', loaded, hex);
     },
+    registerManifest: (manifest) => call('registerManifest', manifest),
     setPartProp: (partId, key, value) => call('setPartProp', partId, key, value),
 
     channels: () => query((api) => api.channels(), []),

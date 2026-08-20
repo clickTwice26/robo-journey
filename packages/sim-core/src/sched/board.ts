@@ -23,6 +23,7 @@ import {
 import { type Fault, fault, formatCurrent, formatVoltage } from '../faults/index.js';
 import { SignalRecorder } from '../instruments/recorder.js';
 import { I2cBus } from '../bus/i2c.js';
+import { SpiBus } from '../bus/spi.js';
 
 export interface BoardOptions extends Atmega328pOptions {
   /** Supply voltage. 5 V for a classic Uno, 3.3 V for a 3V3 board. */
@@ -99,6 +100,14 @@ export class Board {
    */
   readonly i2c: I2cBus;
   /**
+   * The SPI bus, wired to the MCU's SPI peripheral.
+   *
+   * Unlike I2C it needs to see the circuit: SPI carries no address, so which device answers is
+   * decided by whichever chip-select pin the sketch has pulled low, and that is a voltage rather
+   * than a protocol event. The bus is given a node reader for exactly that.
+   */
+  readonly spi: SpiBus;
+  /**
    * Faults that have occurred at any point since reset, keyed by code and subject.
    *
    * Latched deliberately. A blinking LED with no series resistor exceeds the pin's rating for half
@@ -141,6 +150,19 @@ export class Board {
 
     this.i2c = new I2cBus(this.mcu.twi);
     this.mcu.twi.eventHandler = this.i2c;
+
+    this.spi = new SpiBus(
+      this.mcu.spi,
+      (node) => this.circuit.voltage(node),
+      this.supplyVolts,
+    );
+    // A byte reaching SPDR is answered from whichever device's CS is low at that instant, so the
+    // pin states have to be current. Anything the sketch wrote to a CS pin since the last solve is
+    // still sitting in a port register, which is why the bus re-solves before routing the byte.
+    this.mcu.spi.onByte = (value: number) => {
+      if (this.pinsDirty) this.solveAnalog(this.mcu.time - this.lastSolveTime);
+      this.spi.onByte(value);
+    };
 
     this.mcu.onPinChange(() => {
       this.pinsDirty = true;
@@ -362,6 +384,7 @@ export class Board {
     this.recorder.clear();
     this.mcu.usartTx.reset();
     this.i2c.clear();
+    this.spi.clear();
     this.stoppedAt = null;
   }
 
@@ -413,10 +436,15 @@ export class Board {
       }
     }
 
-    // 4. Capture, before faults, so a trace exists for whatever the fault is about.
+    // 4. Chip selects are ordinary GPIO, so a device learns it has been selected or released only
+    // once the voltages are known. Doing this per solve rather than per transfer is what lets a
+    // device see the CS edge that frames its command.
+    this.spi.updateChipSelects();
+
+    // 5. Capture, before faults, so a trace exists for whatever the fault is about.
     this.record();
 
-    // 5. Look for damage.
+    // 6. Look for damage.
     this.detectFaults();
   }
 
@@ -481,6 +509,60 @@ export class Board {
     }
   }
 
+  /**
+   * SPI problems, which are mostly problems of framing rather than of electricity.
+   *
+   * The bus collects them as it routes bytes -- it is the only thing that knows both what the
+   * master is doing and what each device requires -- and they are turned into faults here so they
+   * arrive through the same channel as everything else.
+   */
+  private detectSpiFaults(faults: Fault[], time: number): void {
+    for (const issue of this.spi.protocolIssues) {
+      const code = (
+        {
+          'no-device-selected': 'spi-no-device-selected',
+          'multiple-selected': 'spi-multiple-selected',
+          'mode-mismatch': 'spi-mode-mismatch',
+          'bit-order': 'spi-bit-order',
+          'clock-too-fast': 'spi-clock-too-fast',
+        } as const
+      )[issue.kind];
+      faults.push(fault(code, 'error', issue.peripheralId ?? 'SPI', issue.detail, time));
+    }
+
+    // The ATmega328P's own trap, and one no logic analyser shows. With SPI enabled as master, if
+    // SS is left as an input and something pulls it low, the hardware decides another master is
+    // addressing it, clears MSTR and drops out of master mode -- the transfer simply stops
+    // happening. Reported rather than emulated: the register is avr8js's to own, and a message
+    // naming the cause is more use than a bus that mysteriously goes quiet.
+    //
+    // Gated on the SPI actually being a master, which it is not until the sketch calls
+    // SPI.begin(). Without that gate every sketch raises this during the microseconds between
+    // reset and setup(), when D10 is still an input sitting near zero -- and since faults latch,
+    // a false positive raised once stays on screen forever.
+    if (this.spi.peripheralIds.length === 0) return;
+    if (!this.mcu.spi.isMaster) return;
+    const ss = this.pins.get('D10');
+    if (!ss) return;
+    if (ss.driveState !== 'input' && ss.driveState !== 'input-pullup') return;
+    const ssVolts = this.circuit.voltage(ss.node);
+    if (ssVolts >= 0.6 * this.supplyVolts) return;
+
+    faults.push(
+      fault(
+        'spi-ss-is-input',
+        'error',
+        'D10 (SS)',
+        `D10 is the hardware SS pin, is configured as an input, and sits at ` +
+          `${formatVoltage(ssVolts)}. With SPI running as master the ATmega328P reads anything ` +
+          `below VIH there as another master selecting it: it clears MSTR and stops being a ` +
+          `master, and transfers simply stop. Set D10 as an output, or tie it high -- even if ` +
+          `nothing is wired to it.`,
+        time,
+      ),
+    );
+  }
+
   private detectFaults(): void {
     const faults: Fault[] = [];
     const time = this.mcu.time;
@@ -519,6 +601,14 @@ export class Board {
     }
 
     this.detectI2cFaults(faults, time, vcc);
+    this.detectSpiFaults(faults, time);
+
+    // Anything a device can see about itself but nothing outside it can: a regulator's junction
+    // temperature, for one.
+    for (const device of this.circuit.allDevices) {
+      const reported = device.faults?.(time);
+      if (reported) faults.push(...reported);
+    }
 
     const supplyCurrent = this.supplyCurrent;
     if (supplyCurrent > SUPPLY_ABSOLUTE_MAX_CURRENT) {

@@ -5,8 +5,8 @@
  * no live references into the engine -- the UI reads a picture of the last frame and never touches
  * the solver, which is what lets the engine run flat out without the renderer stalling it.
  */
-import type { ChannelSpec, DisasmLine, Fault } from '@robo-journey/sim-core';
-import type { Project } from '@robo-journey/parts';
+import type { ChannelSpec, DeviceReadout, DisasmLine, Fault } from '@robo-journey/sim-core';
+import type { ComponentManifest, Project } from '@robo-journey/parts';
 
 export interface SimSnapshot {
   readonly running: boolean;
@@ -22,6 +22,14 @@ export interface SimSnapshot {
   /** Perceived brightness 0-1 per LED part id. */
   readonly brightness: Record<string, number>;
   readonly faults: readonly Fault[];
+  /**
+   * Live internals of parts that have any, by part id.
+   *
+   * What a probe cannot reach: a regulator's junction temperature, whether it is in dropout. Only
+   * parts that report something appear here, so the usual circuit of resistors and LEDs adds
+   * nothing to the frame.
+   */
+  readonly readouts: Record<string, readonly DeviceReadout[]>;
   /** Anything written to Serial since the last poll. Cleared on read. */
   readonly serial: string;
   /** Problems reported while building the circuit, e.g. an unknown part. */
@@ -38,6 +46,7 @@ export const EMPTY_SNAPSHOT: SimSnapshot = {
   pins: {},
   voltages: {},
   brightness: {},
+  readouts: {},
   faults: [],
   serial: '',
   problems: [],
@@ -87,6 +96,15 @@ export interface McuState {
 }
 
 export interface SimApi {
+  /**
+   * Teach the worker about a component that is not compiled in.
+   *
+   * The worker keeps its own part registry -- it is a separate module graph -- so a manifest
+   * registered on the UI thread alone gives a part that draws and wires perfectly and then fails
+   * to build with "unknown part type". Must arrive before any `load` that uses it, which call
+   * order over the port guarantees.
+   */
+  registerManifest(manifest: ComponentManifest): void;
   /** Load a project and its compiled firmware. Resets the simulation. */
   load(project: Project, hex: string): void;
   /** Load a project without firmware, so the canvas can still show a static circuit. */

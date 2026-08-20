@@ -31,6 +31,7 @@ import { DatasheetDialog } from './panels/DatasheetDialog.tsx';
 import { AccountDialog } from './panels/AccountDialog.tsx';
 import { CloudProjectsDialog } from './panels/CloudProjectsDialog.tsx';
 import { fetchCurrentUser } from './auth.ts';
+import { restoreLibrary } from './library.ts';
 import { AUTOSAVE_DELAY_MS, saveWorkspace } from './persistence.ts';
 import { useStudio } from './store.ts';
 
@@ -51,6 +52,16 @@ export function App() {
    * reporting every panel as closed forever.
    */
   const [revision, forceRender] = useState(0);
+
+  /**
+   * Restore components the user has added.
+   *
+   * Before anything else touches the simulation, because a restored project may reference one of
+   * them and the worker has to know the part exists before it is asked to build it.
+   */
+  useEffect(() => {
+    restoreLibrary(sim);
+  }, [sim]);
 
   /**
    * Restore the session, if there is one.
@@ -241,6 +252,7 @@ export function App() {
 
       {/* Hosted at the shell so it can be opened from the File menu as well as the palette. */}
       <DatasheetDialog
+        sim={sim}
         open={datasheetOpen}
         onClose={() => setDatasheetOpen(false)}
         onAdded={() => forceRender((n) => n + 1)}

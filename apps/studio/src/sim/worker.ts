@@ -15,10 +15,24 @@ import {
   disassemble,
   loadHex,
   type ChannelSpec,
+  type DeviceReadout,
   type DisasmLine,
   type Fault,
 } from '@robo-journey/sim-core';
-import { buildCircuit, splitTerminal, type BuiltCircuit, type Project } from '@robo-journey/parts';
+import {
+  buildCircuit,
+  installBuiltinManifests,
+  manifestToPartDefinition,
+  registerPart,
+  splitTerminal,
+  type BuiltCircuit,
+  type ComponentManifest,
+  type Project,
+} from '@robo-journey/parts';
+
+// Built-in manifests, installed at module load. The worker has its own registry, and doing this
+// here rather than waiting for a message means they cannot be missed by an ordering mistake.
+installBuiltinManifests();
 import {
   EMPTY_SNAPSHOT,
   type DecodedFrame,
@@ -87,6 +101,21 @@ class Simulation implements SimApi {
    * belongs to the firmware rather than to the circuit around it.
    */
   private progMem: Uint16Array | null = null;
+
+  /**
+   * Register a manifest-described part.
+   *
+   * Failures are swallowed: registering the same part twice is normal when the stored library is
+   * restored alongside a project that already contains it, and refusing the second one would take
+   * out a working circuit for no reason.
+   */
+  registerManifest(manifest: ComponentManifest): void {
+    try {
+      registerPart(manifestToPartDefinition(manifest));
+    } catch {
+      // Already present, or shadowing a built-in.
+    }
+  }
 
   load(project: Project, hex: string): void {
     this.project = project;
@@ -170,8 +199,11 @@ class Simulation implements SimApi {
     }
 
     const brightness: Record<string, number> = {};
+    const readouts: Record<string, readonly DeviceReadout[]> = {};
     for (const [partId, device] of devices) {
       if (device instanceof Led) brightness[partId] = device.brightness;
+      const values = device.readout?.();
+      if (values && values.length > 0) readouts[partId] = values;
     }
 
     const serial = this.serialBuffer;
@@ -185,6 +217,7 @@ class Simulation implements SimApi {
       pins,
       voltages,
       brightness,
+      readouts,
       faults: board.faults as Fault[],
       serial,
       problems: [...problems, ...this.runtimeProblems],

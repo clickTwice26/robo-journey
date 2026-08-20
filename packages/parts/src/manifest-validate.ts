@@ -222,8 +222,106 @@ export function validateManifest(manifest: ComponentManifest): ValidationResult 
       for (const key of ['mosiPin', 'misoPin', 'sckPin', 'csPin'] as const) {
         requirePin(`behavior.${key}`, behavior[key], 'SPI peripheral');
       }
+      // Four distinct wires. Extraction sometimes maps two roles onto one pin when a datasheet's
+      // table lists a shared-function pin twice, and the result routes bytes nowhere.
+      const spiPins = [behavior.mosiPin, behavior.misoPin, behavior.sckPin, behavior.csPin];
+      if (new Set(spiPins).size !== spiPins.length) {
+        error('behavior.csPin', 'MOSI, MISO, SCK and CS must be four different pins.');
+      }
       for (const [index, register] of behavior.registers.entries()) {
         requireState(`behavior.registers[${index}].fromState`, register.fromState, 'Register');
+      }
+      if (behavior.addressing === 'register' && behavior.registers.length === 0) {
+        warn(
+          'behavior.registers',
+          'Register addressing with no registers declared: every read will return zero. Use ' +
+            '"stream" addressing for a part that has no register map.',
+        );
+      }
+      // An ATmega328P can clock SPI at 8 MHz at most, so a lower ceiling than that is a real
+      // constraint on the sketch; anything above it can never be hit and is likely a unit slip.
+      if (behavior.maxClockHz !== undefined && behavior.maxClockHz < 1e5) {
+        warn(
+          'behavior.maxClockHz',
+          `${behavior.maxClockHz} Hz is very slow for SPI. Kilohertz read as hertz?`,
+        );
+      }
+      break;
+    }
+
+    case 'regulator': {
+      requirePin('behavior.inputPin', behavior.inputPin, 'Regulator');
+      requirePin('behavior.outputPin', behavior.outputPin, 'Regulator');
+      requirePin('behavior.groundPin', behavior.groundPin, 'Regulator');
+
+      const regPins = [behavior.inputPin, behavior.outputPin, behavior.groundPin];
+      if (new Set(regPins).size !== regPins.length) {
+        error('behavior.outputPin', 'Input, output and ground must be three different pins.');
+      }
+
+      if (behavior.outputVolts <= 0) {
+        error('behavior.outputVolts', 'A regulator with a zero or negative output regulates nothing.');
+      }
+      // The check that matters most: a manifest claiming a part regulates on less headroom than it
+      // has would make an under-powered circuit look fine, which is the exact failure the archetype
+      // exists to catch.
+      if (behavior.dropoutVolts <= 0) {
+        error(
+          'behavior.dropoutVolts',
+          'Zero dropout is not a real part. Even the best LDOs need 100-200 mV; a 78xx needs 2 V.',
+        );
+      } else if (behavior.dropoutVolts > 5) {
+        warn(
+          'behavior.dropoutVolts',
+          `${behavior.dropoutVolts} V of dropout is unusually high. Check this is the headroom the ` +
+            `part needs and not its maximum input voltage.`,
+        );
+      }
+
+      if (behavior.quiescentAmps > behavior.maxOutputAmps) {
+        error(
+          'behavior.quiescentAmps',
+          'The part consumes more than it can deliver, which cannot be right.',
+        );
+      }
+      if (behavior.quiescentAmps > 0.1) {
+        warn(
+          'behavior.quiescentAmps',
+          `${behavior.quiescentAmps} A of quiescent draw is very high. Milliamps read as amps?`,
+        );
+      }
+
+      // Thermal resistance decides whether the part survives its own dissipation, so a wrong
+      // figure here silently removes the overheating warning entirely.
+      if (behavior.thermalOhmsPerWatt < 1) {
+        warn(
+          'behavior.thermalOhmsPerWatt',
+          `${behavior.thermalOhmsPerWatt} K/W is lower than a large heatsink achieves. With a ` +
+            `figure this low the part will never be reported as overheating.`,
+        );
+      } else if (behavior.thermalOhmsPerWatt > 500) {
+        warn(
+          'behavior.thermalOhmsPerWatt',
+          `${behavior.thermalOhmsPerWatt} K/W is higher than any packaged regulator. This is the ` +
+            `junction-to-ambient figure, not junction-to-case.`,
+        );
+      }
+
+      if (behavior.thermalShutdownC < 80 || behavior.thermalShutdownC > 200) {
+        warn(
+          'behavior.thermalShutdownC',
+          `Thermal shutdown at ${behavior.thermalShutdownC} C is outside the 125-175 C range ` +
+            `regulators use.`,
+        );
+      }
+
+      const limitVMax = manifest.limits.vccMaxVolts;
+      if (limitVMax !== undefined && limitVMax < behavior.outputVolts + behavior.dropoutVolts) {
+        error(
+          'limits.vccMaxVolts',
+          `The maximum input of ${limitVMax} V is below the ` +
+            `${behavior.outputVolts + behavior.dropoutVolts} V this part needs to regulate at all.`,
+        );
       }
       break;
     }

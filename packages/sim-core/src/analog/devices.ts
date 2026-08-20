@@ -8,6 +8,7 @@
  */
 import { GMIN, GROUND, type MnaSystem } from './mna.js';
 import { VT } from './constants.js';
+import { fault, formatCurrent, formatPower, formatTemperature, formatVoltage, type Fault } from '../faults/index.js';
 
 /** What a device sees while stamping itself into the system. */
 export interface StampContext {
@@ -44,6 +45,14 @@ export interface StampContext {
   requestIteration(): void;
 }
 
+/** One named quantity from inside a device, already formatted. */
+export interface DeviceReadout {
+  readonly label: string;
+  readonly value: string;
+  /** Set when this value is the reason something is wrong, so the UI can mark it. */
+  readonly alarm?: boolean;
+}
+
 export interface Device {
   readonly id: string;
   /** Circuit nodes this device connects to, for partitioning and connectivity. */
@@ -78,6 +87,23 @@ export interface Device {
    * sketch is measuring.
    */
   nextEventTime?(now: number): number | null;
+  /**
+   * Problems only this device can see.
+   *
+   * Most faults are found by looking at pins and rails, but some live entirely inside a part: a
+   * regulator's junction temperature is not visible at any terminal, and nothing outside the device
+   * knows what its datasheet allows. Devices that have nothing to report simply omit this.
+   */
+  faults?(time: number): Fault[];
+  /**
+   * Live internal quantities worth putting in front of someone.
+   *
+   * The counterpart to `faults`: those fire when something is already wrong, and these answer the
+   * question that comes before it. A regulator running at 110 degrees raises nothing -- it is
+   * within its rating -- but it is exactly what a person wants to know before committing to a
+   * board, and no probe on any terminal can measure it.
+   */
+  readout?(): DeviceReadout[];
   /** Return to the power-on state. */
   reset?(): void;
 }
@@ -1317,5 +1343,361 @@ export class Potentiometer implements Device {
   stamp(ctx: StampContext): void {
     ctx.mna.stampConductance(this.terminalA, this.wiper, 1 / this.resistanceA);
     ctx.mna.stampConductance(this.wiper, this.terminalB, 1 / this.resistanceB);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+
+export interface RegulatorModel {
+  /** Regulated output, volts. */
+  readonly outputVolts: number;
+  /**
+   * Headroom the part needs above its output, volts.
+   *
+   * The number that decides whether a circuit works at all, and the one people skip. A 7805 needs
+   * about 2 V, so a 6 V battery gives 4 V out and the board it feeds browns out; an AMS1117 needs
+   * 1.1 V; a modern LDO needs a couple of hundred millivolts. Same pinout, completely different
+   * answer to "can I run this off four AAs".
+   */
+  readonly dropoutVolts: number;
+  /** Current the part consumes for itself, which returns through the ground pin. */
+  readonly quiescentAmps: number;
+  /** Current limit. Beyond it the output folds back rather than rising further. */
+  readonly maxOutputAmps: number;
+  /** Output impedance, from the datasheet's load-regulation figure. */
+  readonly outputImpedanceOhms: number;
+  /** Junction-to-ambient thermal resistance, K/W. ~65 for a bare TO-220, ~5 with a decent heatsink. */
+  readonly thermalOhmsPerWatt: number;
+  /** Junction temperature at which the part shuts itself down. */
+  readonly thermalShutdownC: number;
+  /** Thermal mass, J/K. What sets how long the part survives before shutdown. */
+  readonly thermalMassJPerK: number;
+}
+
+/** 7805 in a bare TO-220: the default everyone reaches for, and the one that overheats. */
+export const REGULATOR_7805: RegulatorModel = {
+  outputVolts: 5,
+  dropoutVolts: 2,
+  quiescentAmps: 5e-3,
+  maxOutputAmps: 1,
+  outputImpedanceOhms: 0.02,
+  thermalOhmsPerWatt: 65,
+  thermalShutdownC: 150,
+  thermalMassJPerK: 0.9,
+};
+
+/** AMS1117-3.3, the SOT-223 part on nearly every 3.3 V breakout. */
+export const REGULATOR_AMS1117_33: RegulatorModel = {
+  outputVolts: 3.3,
+  dropoutVolts: 1.1,
+  quiescentAmps: 5e-3,
+  maxOutputAmps: 0.8,
+  outputImpedanceOhms: 0.03,
+  thermalOhmsPerWatt: 110,
+  thermalShutdownC: 165,
+  thermalMassJPerK: 0.15,
+};
+
+/** Ambient the board sits in, degrees C. */
+const AMBIENT_C = 25;
+
+/**
+ * Softness of the dropout and current-limit knees, in volts and amps respectively.
+ *
+ * Both corners are smoothed rather than clamped, for the same reason the op-amp's rails are: a
+ * hard `min` has no derivative at the corner and Newton stalls on it. It is also the more faithful
+ * shape -- a real regulator entering dropout does so gradually as its pass element runs out of
+ * headroom, not at a single voltage.
+ */
+const DROPOUT_SOFTNESS_V = 0.05;
+const LIMIT_SOFTNESS_A = 0.02;
+
+/** Smooth minimum. Approaches `Math.min` as `k` goes to zero, and is differentiable everywhere. */
+function softMin(a: number, b: number, k: number): number {
+  // Evaluated around the smaller value so the exponentials cannot overflow.
+  const m = Math.min(a, b);
+  return m - k * Math.log(Math.exp(-(a - m) / k) + Math.exp(-(b - m) / k));
+}
+
+/** d(softMin)/da: the weight the smaller argument carries, between 0 and 1. */
+function softMinSlope(a: number, b: number, k: number): number {
+  const m = Math.min(a, b);
+  const ea = Math.exp(-(a - m) / k);
+  const eb = Math.exp(-(b - m) / k);
+  return ea / (ea + eb);
+}
+
+/**
+ * A three-terminal linear regulator.
+ *
+ * Modelled as what it physically is: a pass element between IN and OUT, controlled to hold OUT at
+ * the regulated voltage, and unable to do so once either the headroom or the current runs out. The
+ * two limits are why this device is worth simulating -- a regulator treated as an ideal 5 V source
+ * makes every under-volted and every over-loaded design look fine.
+ *
+ * The ground pin carries the load current back plus the quiescent draw, which is not a detail: it
+ * is why the whole of the dissipation appears in this one part, and why the tab gets hot rather
+ * than the wiring.
+ *
+ * Thermally, junction temperature is integrated with a real time constant, so a part that will
+ * eventually shut down keeps working for the seconds it takes to heat up -- reproducing the
+ * "works for half a minute, then dies, then comes back" failure. `steadyStateJunctionC` reports
+ * where it is heading, so the fault layer can warn immediately instead of waiting.
+ */
+export class LinearRegulator implements Device {
+  readonly branchCount = 0;
+  readonly internalNodeCount = 0;
+  readonly nonlinear = true;
+  branchOffset = 0;
+  internalNodeOffset = -1;
+  readonly nodes: readonly number[];
+
+  private lastCurrent = 0;
+  private lastInput = 0;
+  private lastOutput = 0;
+  private dropout = false;
+  private limiting = false;
+  private junctionC = AMBIENT_C;
+  private shutdown = false;
+
+  constructor(
+    readonly id: string,
+    private readonly input: number,
+    private readonly output: number,
+    private readonly ground: number,
+    readonly model: RegulatorModel = REGULATOR_7805,
+  ) {
+    this.nodes = [input, output, ground];
+  }
+
+  reset(): void {
+    this.lastCurrent = 0;
+    this.lastInput = 0;
+    this.lastOutput = 0;
+    this.dropout = false;
+    this.limiting = false;
+    this.junctionC = AMBIENT_C;
+    this.shutdown = false;
+  }
+
+  /** Current delivered to the load, amps. */
+  get outputCurrent(): number {
+    return this.lastCurrent;
+  }
+
+  /** Power turned into heat inside the part, watts. */
+  get dissipationWatts(): number {
+    const across = this.lastInput - this.lastOutput;
+    return Math.max(0, across * this.lastCurrent + this.lastInput * this.model.quiescentAmps);
+  }
+
+  /** Junction temperature now, degrees C. */
+  get junctionTemperatureC(): number {
+    return this.junctionC;
+  }
+
+  /** Junction temperature this dissipation will settle at, degrees C. */
+  get steadyStateJunctionC(): number {
+    return AMBIENT_C + this.dissipationWatts * this.model.thermalOhmsPerWatt;
+  }
+
+  /** True when there is not enough input voltage left to regulate. */
+  get inDropout(): boolean {
+    return this.dropout;
+  }
+
+  /** True when the current limit is what is holding the output down. */
+  get currentLimited(): boolean {
+    return this.limiting;
+  }
+
+  /** True once thermal shutdown has tripped. */
+  get thermalShutdown(): boolean {
+    return this.shutdown;
+  }
+
+  stamp(ctx: StampContext): void {
+    const vIn = ctx.voltage(this.input) - ctx.voltage(this.ground);
+    const rawOut = ctx.voltage(this.output) - ctx.voltage(this.ground);
+    const { outputImpedanceOhms, maxOutputAmps, quiescentAmps } = this.model;
+
+    // A regulator in thermal shutdown stops driving entirely, leaving the output to whatever the
+    // load pulls it to -- which is the observable symptom, an output that collapses to zero.
+    if (this.shutdown) {
+      ctx.mna.stampConductance(this.output, this.ground, GMIN);
+      ctx.mna.stampCurrentSource(this.input, this.ground, quiescentAmps * ctx.sourceScale);
+      this.lastCurrent = 0;
+      this.lastInput = vIn;
+      this.lastOutput = rawOut;
+      return;
+    }
+
+    // What the pass element can hold the output at: the regulated voltage, or as close to the
+    // input as the dropout allows, whichever is lower.
+    const headroomLimited = vIn - this.model.dropoutVolts;
+    const vOpen = softMin(this.model.outputVolts, headroomLimited, DROPOUT_SOFTNESS_V);
+    const dVopenDvin = softMinSlope(headroomLimited, this.model.outputVolts, DROPOUT_SOFTNESS_V);
+
+    // Terminal limiting, for the same reason diodes need it.
+    //
+    // Twenty milliohms of output impedance means an output voltage a volt away from the setpoint
+    // implies fifty amps, and Newton's first iteration -- which starts from zero -- lands far
+    // further away than that. Left alone it overshoots to a hundred volts and comes back on the
+    // second pass, which converges here but would have driven any nonlinear part sharing the node
+    // through an exponential it cannot survive. Clamping the voltage this device linearises about
+    // bounds the excursion without changing where the solution lands.
+    const vOut = Math.max(-1, Math.min(vOpen + 1, rawOut));
+    if (vOut !== rawOut) ctx.requestIteration();
+
+    // Current the regulator would deliver at this output voltage, then the current limit.
+    const unlimited = (vOpen - vOut) / outputImpedanceOhms;
+    const i = softMin(unlimited, maxOutputAmps, LIMIT_SOFTNESS_A);
+    const limitSlope = softMinSlope(unlimited, maxOutputAmps, LIMIT_SOFTNESS_A);
+
+    // Partials of the delivered current, which are the transconductances to stamp.
+    const gOut = -limitSlope / outputImpedanceOhms;
+    const gIn = (limitSlope / outputImpedanceOhms) * dVopenDvin;
+
+    // Linearised about this operating point: i = Ieq + gIn*vIn + gOut*vOut.
+    const ieq = i - gIn * vIn - gOut * vOut;
+
+    // The current flows in at IN and out at OUT, so both transconductances drive the same pair.
+    ctx.mna.stampVCCS(this.input, this.output, this.input, this.ground, gIn);
+    ctx.mna.stampVCCS(this.input, this.output, this.output, this.ground, gOut);
+    ctx.mna.stampCurrentSource(this.input, this.output, ieq);
+
+    // Quiescent draw: in at IN, out at GND. This is the part that keeps flowing with no load, and
+    // the reason a linear regulator is a poor choice on a battery.
+    ctx.mna.stampCurrentSource(this.input, this.ground, quiescentAmps * ctx.sourceScale);
+
+    // Keep the terminals tied into the matrix even with nothing else on them.
+    ctx.mna.stampConductance(this.input, this.ground, GMIN);
+    ctx.mna.stampConductance(this.output, this.ground, GMIN);
+
+    this.lastCurrent = i;
+    this.lastInput = vIn;
+    this.lastOutput = vOut;
+    this.dropout = headroomLimited < this.model.outputVolts;
+    this.limiting = limitSlope < 0.5;
+  }
+
+  /**
+   * Integrate the junction temperature over the step.
+   *
+   * First-order: the part stores heat and sheds it to ambient through its thermal resistance, so
+   * a brief overload does nothing and a sustained one eventually trips. Restart happens 25 degrees
+   * below the shutdown point, the hysteresis real parts use -- which is what turns a thermal
+   * problem into the oscillation people describe as the regulator "pulsing".
+   */
+  commit(ctx: StampContext): void {
+    const dt = ctx.timestep;
+    if (dt <= 0) return;
+
+    const { thermalOhmsPerWatt, thermalMassJPerK, thermalShutdownC } = this.model;
+    const settled = AMBIENT_C + this.dissipationWatts * thermalOhmsPerWatt;
+    const tau = thermalOhmsPerWatt * thermalMassJPerK;
+    // Exact solution of the first-order response over the step, so a large timestep neither
+    // overshoots nor needs the step size limited for the sake of a thermal model.
+    this.junctionC = settled + (this.junctionC - settled) * Math.exp(-dt / tau);
+
+    if (!this.shutdown && this.junctionC >= thermalShutdownC) this.shutdown = true;
+    else if (this.shutdown && this.junctionC <= thermalShutdownC - 25) this.shutdown = false;
+  }
+
+  readout(): DeviceReadout[] {
+    const settled = this.steadyStateJunctionC;
+    const status = this.shutdown
+      ? 'thermal shutdown'
+      : this.limiting
+        ? 'current limited'
+        : this.dropout
+          ? 'in dropout'
+          : 'regulating';
+
+    return [
+      { label: 'Status', value: status, alarm: status !== 'regulating' },
+      { label: 'Output', value: formatVoltage(this.lastOutput), alarm: this.dropout || this.limiting },
+      { label: 'Current', value: formatCurrent(this.lastCurrent) },
+      { label: 'Dropping', value: formatVoltage(Math.max(0, this.lastInput - this.lastOutput)) },
+      { label: 'Dissipation', value: formatPower(this.dissipationWatts) },
+      { label: 'Junction', value: formatTemperature(this.junctionC) },
+      {
+        label: 'Settles at',
+        value: formatTemperature(settled),
+        alarm: settled > this.model.thermalShutdownC,
+      },
+    ];
+  }
+
+  /**
+   * What is wrong inside the part.
+   *
+   * All four of these are invisible from the outside until the circuit has already failed. The
+   * heat one is reported against the temperature the part is *heading* for rather than the one it
+   * has reached, because the thermal time constant of a TO-220 is the better part of a minute --
+   * long enough that a simulation nobody watches for that long would never mention it, which is
+   * precisely the mistake the real build makes too.
+   */
+  faults(time: number): Fault[] {
+    const found: Fault[] = [];
+    const settled = this.steadyStateJunctionC;
+
+    if (this.shutdown) {
+      found.push(
+        fault(
+          'regulator-thermal-shutdown',
+          'error',
+          this.id,
+          `${this.id} has shut down thermally at ${formatTemperature(this.junctionC)}. Its output ` +
+            `has collapsed and will stay off until it cools; anything it powers has lost its supply.`,
+          time,
+        ),
+      );
+    } else if (settled > this.model.thermalShutdownC) {
+      found.push(
+        fault(
+          'regulator-overheating',
+          'error',
+          this.id,
+          `${this.id} is dissipating ${formatPower(this.dissipationWatts)} and heading for ` +
+            `${formatTemperature(settled)}, past its ${formatTemperature(this.model.thermalShutdownC)} ` +
+            `shutdown. Drop the input voltage, cut the load, or fit a heatsink -- it is the ` +
+            `${formatVoltage(this.lastInput - this.lastOutput)} across it times ` +
+            `${formatCurrent(this.lastCurrent)} that becomes heat.`,
+          time,
+        ),
+      );
+    }
+
+    if (this.dropout && !this.shutdown) {
+      found.push(
+        fault(
+          'regulator-dropout',
+          'error',
+          this.id,
+          `${this.id} has only ${formatVoltage(this.lastInput)} in and needs ` +
+            `${formatVoltage(this.model.outputVolts + this.model.dropoutVolts)} to regulate, so its ` +
+            `output has sagged to ${formatVoltage(this.lastOutput)} instead of ` +
+            `${formatVoltage(this.model.outputVolts)}.`,
+          time,
+        ),
+      );
+    }
+
+    if (this.limiting && !this.shutdown) {
+      found.push(
+        fault(
+          'regulator-over-current',
+          'error',
+          this.id,
+          `${this.id} is at its ${formatCurrent(this.model.maxOutputAmps)} current limit, holding ` +
+            `the output down to ${formatVoltage(this.lastOutput)}. The load wants more than this ` +
+            `part can give.`,
+          time,
+        ),
+      );
+    }
+
+    return found;
   }
 }

@@ -223,15 +223,74 @@ export const BehaviorSchema = z.discriminatedUnion('kind', [
     registers: z.array(RegisterSchema).default([]),
   }),
 
-  /** SPI peripheral with a register file. */
+  /**
+   * SPI peripheral with a register file.
+   *
+   * The addressing fields matter more here than they do on I2C. SPI has no addressing of its own,
+   * so each family invented its own framing on top, and the differences are small enough to be
+   * easy to get wrong: nearly every sensor sends one command byte carrying a read/write flag and a
+   * register address, but which bit is the flag and which polarity means "read" varies from part
+   * to part.
+   */
   z.object({
     kind: z.literal('spi-peripheral'),
     mosiPin: z.string(),
     misoPin: z.string(),
     sckPin: z.string(),
     csPin: z.string(),
+    /** SPI mode, 0-3, from the datasheet's CPOL and CPHA. */
     mode: z.number().int().min(0).max(3).default(0),
+    /** Chip select polarity. Active-low on essentially everything. */
+    csActiveLow: z.boolean().default(true),
+    bitOrder: z.enum(['msbFirst', 'lsbFirst']).default('msbFirst'),
+    /** Maximum SCK the datasheet allows, hertz. */
+    maxClockHz: z.number().positive().optional(),
+    /**
+     * `register` for the command-byte convention; `stream` for parts with no addressing at all,
+     * such as shift registers and most graphic displays.
+     */
+    addressing: z.enum(['register', 'stream']).default('register'),
+    /** Bit of the command byte holding the read/write flag. */
+    readBitPosition: z.number().int().min(0).max(7).default(7),
+    /** Value of that bit meaning "read". 1 on most parts; a few invert it. */
+    readBitValue: z.union([z.literal(0), z.literal(1)]).default(1),
+    /** Whether the register address advances between data bytes in one transaction. */
+    autoIncrement: z.boolean().default(true),
     registers: z.array(RegisterSchema).default([]),
+  }),
+
+  /**
+   * A linear voltage regulator.
+   *
+   * Present in nearly every project and absent from every simulator, which is why a whole class of
+   * power problems only ever shows up on the bench. Two numbers do the work: the dropout decides
+   * whether the thing regulates at all on the supply it has been given, and the thermal resistance
+   * decides whether it survives doing so. A 7805 fed 12 V at half an amp is a correct circuit that
+   * shuts down after half a minute, and nothing about the schematic says so.
+   */
+  z.object({
+    kind: z.literal('regulator'),
+    inputPin: z.string(),
+    outputPin: z.string(),
+    groundPin: z.string(),
+    outputVolts: Volts,
+    /** Headroom above the output the part needs. ~2 V for a 7805, ~1.1 V for an AMS1117. */
+    dropoutVolts: Volts.default(2),
+    /** The part's own consumption, which returns through the ground pin. */
+    quiescentAmps: Amps.default(5e-3),
+    maxOutputAmps: Amps.default(1),
+    /** From the datasheet's load-regulation figure. */
+    outputImpedanceOhms: Ohms.default(0.02),
+    /**
+     * Junction-to-ambient thermal resistance, K/W.
+     *
+     * The datasheet gives several: use the free-air figure unless the design has a heatsink. A
+     * bare TO-220 is around 65, the same part on a decent heatsink around 5, an SOT-223 around 110.
+     */
+    thermalOhmsPerWatt: z.number().positive().default(65),
+    thermalShutdownC: z.number().default(150),
+    /** Thermal mass, J/K. Sets how long it takes to overheat, not whether it does. */
+    thermalMassJPerK: z.number().positive().default(0.9),
   }),
 
   /**

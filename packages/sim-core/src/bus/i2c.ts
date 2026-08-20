@@ -13,6 +13,8 @@
  * solver can see whether SDA and SCL actually have a path to the rail.
  */
 
+import { RegisterFile, type RegisterSpec } from './registers.js';
+
 /** A device sitting on the bus at one 7-bit address. */
 export interface I2cPeripheral {
   /** 7-bit address, without the read/write bit. */
@@ -152,18 +154,7 @@ export class I2cBus {
 
 // ---------------------------------------------------------------------------------------------
 
-export interface RegisterSpec {
-  readonly address: number;
-  readonly name: string;
-  readonly reset: number;
-  readonly access: 'r' | 'w' | 'rw';
-  /** Reads return this state variable, scaled. */
-  readonly fromState?: string | undefined;
-  readonly scale: number;
-  readonly offset: number;
-  /** Width in bytes, for values spanning several addresses. */
-  readonly bytes: number;
-}
+export type { RegisterSpec } from './registers.js';
 
 /**
  * The register-file peripheral almost every I2C breakout actually is.
@@ -174,8 +165,7 @@ export interface RegisterSpec {
  * a simulated thermometer returns the temperature the user chose rather than a stored constant.
  */
 export class RegisterFilePeripheral implements I2cPeripheral {
-  private readonly bytes = new Map<number, number>();
-  private readonly specs = new Map<number, RegisterSpec>();
+  private readonly file: RegisterFile;
   /** Auto-incrementing pointer, as the hardware keeps. */
   private pointer = 0;
   /** True until the first byte of a write transaction has been taken as the pointer. */
@@ -184,15 +174,9 @@ export class RegisterFilePeripheral implements I2cPeripheral {
   constructor(
     readonly address: number,
     specs: readonly RegisterSpec[],
-    private readonly readState: (name: string) => number = () => 0,
+    readState: (name: string) => number = () => 0,
   ) {
-    for (const spec of specs) {
-      this.specs.set(spec.address, spec);
-      // Multi-byte registers occupy consecutive addresses, big-endian as most sensors use.
-      for (let i = 0; i < spec.bytes; i++) {
-        this.bytes.set(spec.address + i, (spec.reset >> (8 * (spec.bytes - 1 - i))) & 0xff);
-      }
-    }
+    this.file = new RegisterFile(specs, readState);
   }
 
   onStart(write: boolean): void {
@@ -208,49 +192,24 @@ export class RegisterFilePeripheral implements I2cPeripheral {
       return true;
     }
 
-    const spec = this.specs.get(this.pointer);
-    // Writing a read-only register is acknowledged but discarded, as the hardware does.
-    if (!spec || spec.access !== 'r') this.bytes.set(this.pointer, byte & 0xff);
+    this.file.write(this.pointer, byte);
     this.pointer = (this.pointer + 1) & 0xff;
     return true;
   }
 
   onRead(): number {
-    const value = this.byteAt(this.pointer);
+    const value = this.file.byteAt(this.pointer);
     this.pointer = (this.pointer + 1) & 0xff;
     return value;
   }
 
   /** Current value of a named register, for tests and the inspector. */
   read(name: string): number {
-    for (const spec of this.specs.values()) {
-      if (spec.name !== name) continue;
-      let value = 0;
-      for (let i = 0; i < spec.bytes; i++) value = (value << 8) | this.byteAt(spec.address + i);
-      return value;
-    }
-    throw new Error(`No register named "${name}"`);
+    return this.file.read(name);
   }
 
   /** Every byte the master has written, for a display's framebuffer. */
   snapshot(): Map<number, number> {
-    return new Map(this.bytes);
-  }
-
-  private byteAt(address: number): number {
-    // Find the register covering this address, so a multi-byte value backed by state renders
-    // correctly across all of its bytes.
-    for (const spec of this.specs.values()) {
-      if (address < spec.address || address >= spec.address + spec.bytes) continue;
-      if (spec.fromState === undefined) break;
-
-      const raw = Math.round(this.readState(spec.fromState) * spec.scale + spec.offset);
-      const width = spec.bytes * 8;
-      // Two's complement in the register's own width, which is how signed sensor readings arrive.
-      const masked = raw < 0 ? (raw + (1 << width)) & ((1 << width) - 1) : raw;
-      const shift = 8 * (spec.bytes - 1 - (address - spec.address));
-      return (masked >> shift) & 0xff;
-    }
-    return this.bytes.get(address) ?? 0;
+    return this.file.snapshot();
   }
 }

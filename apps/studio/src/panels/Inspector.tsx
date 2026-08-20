@@ -1,9 +1,12 @@
 /**
- * MCU inspector.
+ * Inspector: what is going on inside the chip, and inside the parts around it.
  *
  * Registers by name with their bits spelled out, rather than a hex dump. `DDRB = 0x20` makes you
  * go and look it up; `DDB5` lit means D13 is an output, which is the thing you actually wanted to
  * know. Named registers are the difference between a memory viewer and a debugger.
+ *
+ * Parts come first, because a regulator's junction temperature is not something a probe can reach
+ * and it is usually the reason someone opened this panel.
  */
 import {
   Box,
@@ -31,6 +34,67 @@ const EMPTY: McuState = {
   registers: [],
   gpr: [],
 };
+
+/**
+ * Live internals of any part that reports them.
+ *
+ * Only parts with something to say appear, so a circuit of resistors and LEDs shows nothing here
+ * rather than a list of empty rows.
+ */
+function PartReadouts() {
+  const readouts = useStudio((s) => s.snapshot.readouts);
+  const entries = Object.entries(readouts);
+  if (entries.length === 0) return null;
+
+  return (
+    <>
+      <Box sx={{ p: 1 }}>
+        <Typography variant="overline" color="text.secondary">
+          Parts
+        </Typography>
+        {entries.map(([partId, values]) => (
+          <Box key={partId} sx={{ mt: 0.5 }}>
+            <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'text.secondary' }}>
+              {partId}
+            </Typography>
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+                gap: 0.5,
+                mt: 0.25,
+              }}
+            >
+              {values.map((value) => (
+                <Box
+                  key={value.label}
+                  sx={{
+                    px: 0.75,
+                    py: 0.4,
+                    borderRadius: 1,
+                    border: 1,
+                    borderColor: value.alarm ? 'error.main' : 'divider',
+                    // Alarm colouring rather than an icon: these update ten times a second and a
+                    // blinking icon beside a changing number is unreadable.
+                    color: value.alarm ? 'error.main' : 'text.primary',
+                  }}
+                >
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    {value.label}
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+                    {value.value}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+          </Box>
+        ))}
+      </Box>
+      <Divider />
+    </>
+  );
+}
 
 /** SREG bits, MSB first. */
 const SREG_BITS = ['I', 'T', 'H', 'S', 'V', 'N', 'Z', 'C'];
@@ -65,6 +129,8 @@ export function InspectorPanel({ sim }: { sim: SimulationController }) {
 
   return (
     <Box sx={{ height: '100%', overflow: 'auto' }}>
+      <PartReadouts />
+
       <Stack direction="row" spacing={1} sx={{ p: 1, flexWrap: 'wrap' }}>
         <Tooltip title="Program counter, as a byte address — matches avr-objdump">
           <Chip size="small" variant="outlined" label={`PC ${hex(state.pc, 4)}`} />

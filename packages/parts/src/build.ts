@@ -172,6 +172,8 @@ export function buildCircuit(project: Project, options: BuildOptions): BuiltCirc
           if (!devices.has(part.id)) devices.set(part.id, device);
         },
         attachI2c: (peripheral) => board.i2c.attach(peripheral),
+        attachSpi: (peripheral, csNode, csActiveLow) =>
+          board.spi.attach({ peripheral, csNode, csActiveLow }),
       });
     } catch (error) {
       problems.push(`Could not build ${part.id}: ${(error as Error).message}`);

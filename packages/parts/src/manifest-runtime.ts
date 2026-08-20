@@ -10,10 +10,12 @@ import {
   Bjt,
   GROUND,
   Led,
+  LinearRegulator,
   Mosfet,
   OpAmp,
   Potentiometer,
   RegisterFilePeripheral,
+  SpiRegisterPeripheral,
   type Device,
   type StampContext,
 } from '@robo-journey/sim-core';
@@ -159,7 +161,7 @@ export class ManifestDevice implements Device {
   stamp(ctx: StampContext): void {
     // These devices own their terminals. Stamping generic pin models on top would hang stray
     // impedances off a gate or an op-amp input and skew every operating point.
-    const owned = ['transistor', 'mosfet', 'op-amp', 'potentiometer'];
+    const owned = ['transistor', 'mosfet', 'op-amp', 'potentiometer', 'regulator'];
     if (owned.includes(this.manifest.behavior.kind)) return;
 
     for (const pin of this.manifest.pins) this.stampPin(ctx, pin);
@@ -501,6 +503,67 @@ export function manifestToPartDefinition(
               bytes: register.bytes,
             })),
             (name) => state.get(name),
+          ),
+        );
+      }
+
+      // SPI peripherals, like I2C ones, answer on the bus rather than through their pins -- but
+      // the chip-select pin is ordinary GPIO and stays a real node, because that is exactly what
+      // the bus reads to decide who is being addressed.
+      if (manifest.behavior.kind === 'spi-peripheral') {
+        const behavior = manifest.behavior;
+        if (!ctx.attachSpi) {
+          throw new Error(
+            `${manifest.name} is an SPI device, but this circuit has no SPI bus to attach it to.`,
+          );
+        }
+        ctx.attachSpi(
+          new SpiRegisterPeripheral(
+            manifest.name,
+            behavior.registers.map((register) => ({
+              address: register.address,
+              name: register.name,
+              reset: register.reset,
+              access: register.access,
+              fromState: register.fromState,
+              scale: register.scale,
+              offset: register.offset,
+              bytes: register.bytes,
+            })),
+            (name) => state.get(name),
+            {
+              addressing: behavior.addressing,
+              readBitPosition: behavior.readBitPosition,
+              readBitValue: behavior.readBitValue,
+              autoIncrement: behavior.autoIncrement,
+              mode: behavior.mode,
+              bitOrder: behavior.bitOrder,
+              ...(behavior.maxClockHz !== undefined ? { maxClockHz: behavior.maxClockHz } : {}),
+            },
+          ),
+          nodes.get(behavior.csPin) ?? GROUND,
+          behavior.csActiveLow,
+        );
+      }
+
+      if (manifest.behavior.kind === 'regulator') {
+        const behavior = manifest.behavior;
+        ctx.add(
+          new LinearRegulator(
+            ctx.partId,
+            nodes.get(behavior.inputPin) ?? GROUND,
+            nodes.get(behavior.outputPin) ?? GROUND,
+            nodes.get(behavior.groundPin) ?? GROUND,
+            {
+              outputVolts: behavior.outputVolts,
+              dropoutVolts: behavior.dropoutVolts,
+              quiescentAmps: behavior.quiescentAmps,
+              maxOutputAmps: behavior.maxOutputAmps,
+              outputImpedanceOhms: behavior.outputImpedanceOhms,
+              thermalOhmsPerWatt: behavior.thermalOhmsPerWatt,
+              thermalShutdownC: behavior.thermalShutdownC,
+              thermalMassJPerK: behavior.thermalMassJPerK,
+            },
           ),
         );
       }

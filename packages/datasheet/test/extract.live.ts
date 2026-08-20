@@ -122,6 +122,33 @@ gfs       Forward Transconductance: 19 S min (VDS = 25 V, ID = 25 A)
 Package: TO-220AB. Pin 1 = Gate, Pin 2 = Drain, Pin 3 = Source.
 `;
 
+const L7805_DATASHEET = `
+L7805CV Positive Voltage Regulator
+5 V fixed output, TO-220 package
+
+Absolute Maximum Ratings
+VI  DC Input Voltage: 35 V
+IO  Output Current: internally limited, 1.5 A peak
+PD  Power Dissipation: internally limited
+TJ  Operating Junction Temperature: 0 to 125 C, thermal shutdown above 150 C
+
+Thermal Data
+RthJC  Thermal Resistance Junction-Case:    5 C/W
+RthJA  Thermal Resistance Junction-Ambient: 50 C/W (TO-220, no heatsink)
+
+Electrical Characteristics (TJ = 25 C, VI = 10 V, IO = 500 mA unless otherwise specified)
+VO       Output Voltage:            4.8 V min, 5.0 V typ, 5.2 V max
+VI - VO  Dropout Voltage:           2.0 V typ (IO = 1 A, TJ = 25 C)
+IO       Output Current:            1.0 A guaranteed
+Iq       Quiescent Current:         4.2 mA typ, 6 mA max
+dVO      Load Regulation:           10 mV typ (IO = 5 mA to 1.5 A)
+dVO      Line Regulation:           7 mV typ (VI = 7 V to 25 V)
+
+Note: the input voltage must remain at least 2 V above the output for the device to regulate.
+
+Package: TO-220. Pin 1 = INPUT, Pin 2 = GROUND (tab), Pin 3 = OUTPUT.
+`;
+
 const firmware = (name: string): string =>
   readFileSync(fileURLToPath(new URL(`../../sim-core/test/fixtures/${name}`, import.meta.url)), 'utf8');
 
@@ -363,6 +390,69 @@ describeIfKey('extracting from a datasheet', () => {
       expect(Math.abs(q.vds)).toBeLessThan(0.5);
     },
     120_000,
+  );
+
+  it(
+    'reads a 7805 into a regulator that drops out and overheats like the real part',
+    async () => {
+      const result = await extractManifest({
+        apiKey,
+        input: { kind: 'text', text: L7805_DATASHEET },
+        hint: 'L7805CV fixed 5 V linear regulator',
+      });
+
+      expect(result.ok).toBe(true);
+      const manifest = result.manifest!;
+      expect(validateManifest(manifest).ok).toBe(true);
+
+      // A regulator forced into "passive" would place on the canvas and regulate nothing, which is
+      // the failure mode this archetype exists to prevent.
+      expect(manifest.behavior.kind).toBe('regulator');
+      if (manifest.behavior.kind !== 'regulator') return;
+      const behavior = manifest.behavior;
+
+      expect(behavior.outputVolts).toBeCloseTo(5, 1);
+      // The number the whole archetype turns on. Read as anything else -- the input range, say --
+      // and an under-powered design would simulate as working.
+      expect(behavior.dropoutVolts).toBeGreaterThan(1.5);
+      expect(behavior.dropoutVolts).toBeLessThan(3);
+      // 4.2 mA, not 4.2 A.
+      expect(behavior.quiescentAmps).toBeGreaterThan(1e-3);
+      expect(behavior.quiescentAmps).toBeLessThan(0.02);
+      // Junction-to-ambient, not the much smaller junction-to-case figure sitting next to it.
+      expect(behavior.thermalOhmsPerWatt).toBeGreaterThan(20);
+
+      registerPart(manifestToPartDefinition(manifest));
+      try {
+        const inPin = behavior.inputPin;
+        const outPin = behavior.outputPin;
+        const gndPin = behavior.groundPin;
+
+        // 5 V in is not enough for a part needing 7 V, so it must sag rather than pretend.
+        const project = parseProject({
+          version: 1,
+          parts: [
+            { id: 'uno1', type: 'arduino-uno', x: 0, y: 0 },
+            { id: 'u1', type: manifest.id, x: 0, y: 80 },
+            { id: 'r1', type: 'resistor', x: 40, y: 80, props: { ohms: 100 } },
+          ],
+          wires: [
+            { id: 'w1', from: `u1:${inPin}`, to: 'uno1:5V' },
+            { id: 'w2', from: `u1:${gndPin}`, to: 'uno1:GND' },
+            { id: 'w3', from: `u1:${outPin}`, to: 'r1:a' },
+            { id: 'w4', from: 'r1:b', to: 'uno1:GND' },
+          ],
+        });
+
+        const { board, problems } = buildCircuit(project, { progMem: loadHex(firmware('blink.hex')) });
+        expect(problems).toEqual([]);
+        board.runFor(0.01);
+        expect(board.faults.some((f) => f.code === 'regulator-dropout')).toBe(true);
+      } finally {
+        unregisterPart(manifest.id);
+      }
+    },
+    180_000,
   );
 
   it(

@@ -27,7 +27,28 @@ export type FaultCode =
   | 'floating-input'
   | 'over-voltage'
   | 'i2c-no-pullup'
-  | 'i2c-address-clash';
+  | 'i2c-address-clash'
+  | 'spi-no-device-selected'
+  | 'spi-multiple-selected'
+  | 'spi-mode-mismatch'
+  | 'spi-bit-order'
+  | 'spi-clock-too-fast'
+  | 'spi-ss-is-input'
+  | 'regulator-dropout'
+  | 'regulator-over-current'
+  | 'regulator-overheating'
+  | 'regulator-thermal-shutdown';
+
+/** Format a temperature. */
+export function formatTemperature(celsius: number): string {
+  return `${celsius.toFixed(0)} C`;
+}
+
+/** Format a power in watts or milliwatts, whichever reads better. */
+export function formatPower(watts: number): string {
+  if (Math.abs(watts) < 1) return `${(watts * 1000).toFixed(0)} mW`;
+  return `${watts.toFixed(2)} W`;
+}
 
 export function fault(
   code: FaultCode,

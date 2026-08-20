@@ -9,7 +9,7 @@
  * hole part, so working in real units means a resistor's legs land in adjacent holes because the
  * arithmetic says so, not because a pixel offset was tuned by hand.
  */
-import { Led, Resistor, type Device, type I2cPeripheral } from '@robo-journey/sim-core';
+import { Led, Resistor, type Device, type I2cPeripheral, type SpiPeripheral } from '@robo-journey/sim-core';
 import {
   FULL_SIZE_BREADBOARD,
   HALF_SIZE_BREADBOARD,
@@ -48,6 +48,13 @@ export interface BuildContext {
    * when built somewhere without it rather than silently never answering.
    */
   attachI2c?(peripheral: I2cPeripheral): void;
+  /**
+   * Attach a peripheral to the board's SPI bus.
+   *
+   * Takes the chip-select node as well as the device, because SPI has no addressing: which device
+   * answers is decided by a voltage on a wire, so the bus has to be told which wire.
+   */
+  attachSpi?(peripheral: SpiPeripheral, csNode: number, csActiveLow: boolean): void;
 }
 
 /**

@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { digitalChannel, loadHex } from '@robo-journey/sim-core';
 import {
+  BUILTIN_MANIFESTS,
   buildCircuit,
   manifestToPartDefinition,
   parseManifest,
@@ -185,6 +186,116 @@ describe('semantic validation', () => {
       }),
     );
     expect(result.issues.some((i) => i.message.includes('unreachable'))).toBe(true);
+  });
+
+  describe('regulators', () => {
+    /** Start from a valid 7805 and break one thing per case. */
+    const bend = (change: (m: ComponentManifest) => void): ComponentManifest => {
+      const manifest = structuredClone(
+        BUILTIN_MANIFESTS.find((m) => m.id === 'lm7805')!,
+      ) as ComponentManifest;
+      change(manifest);
+      return manifest;
+    };
+
+    const regulator = (m: ComponentManifest) =>
+      m.behavior.kind === 'regulator' ? m.behavior : undefined;
+
+    it('rejects a regulator with no dropout', () => {
+      // Zero dropout would make every under-powered design look fine, which is exactly the failure
+      // this archetype exists to surface.
+      const result = validateManifest(bend((m) => {
+        const b = regulator(m);
+        if (b) b.dropoutVolts = 0;
+      }));
+      expect(result.ok).toBe(false);
+      expect(result.issues.some((i) => i.message.includes('LDO'))).toBe(true);
+    });
+
+    it('rejects a part that consumes more than it can deliver', () => {
+      const result = validateManifest(bend((m) => {
+        const b = regulator(m);
+        if (b) b.quiescentAmps = 2;
+      }));
+      expect(result.ok).toBe(false);
+    });
+
+    it('catches milliamps of quiescent current read as amps', () => {
+      const result = validateManifest(bend((m) => {
+        const b = regulator(m);
+        if (b) {
+          b.quiescentAmps = 5;
+          b.maxOutputAmps = 10;
+        }
+      }));
+      expect(result.issues.some((i) => i.message.includes('Milliamps read as amps'))).toBe(true);
+    });
+
+    it('rejects a maximum input below what the part needs to regulate', () => {
+      const result = validateManifest(bend((m) => {
+        m.limits.vccMaxVolts = 6;
+      }));
+      expect(result.ok).toBe(false);
+      expect(result.issues.some((i) => i.message.includes('regulate at all'))).toBe(true);
+    });
+
+    it('warns about a thermal resistance that would hide overheating', () => {
+      const result = validateManifest(bend((m) => {
+        const b = regulator(m);
+        if (b) b.thermalOhmsPerWatt = 0.5;
+      }));
+      expect(result.ok).toBe(true);
+      expect(result.issues.some((i) => i.message.includes('never be reported'))).toBe(true);
+    });
+
+    it('rejects input and output on the same pin', () => {
+      const result = validateManifest(bend((m) => {
+        const b = regulator(m);
+        if (b) b.outputPin = b.inputPin;
+      }));
+      expect(result.ok).toBe(false);
+    });
+  });
+
+  describe('SPI peripherals', () => {
+    const bend = (change: (m: ComponentManifest) => void): ComponentManifest => {
+      const manifest = structuredClone(
+        BUILTIN_MANIFESTS.find((m) => m.id === 'adxl345')!,
+      ) as ComponentManifest;
+      change(manifest);
+      return manifest;
+    };
+
+    const spi = (m: ComponentManifest) =>
+      m.behavior.kind === 'spi-peripheral' ? m.behavior : undefined;
+
+    it('rejects two bus roles sharing a pin', () => {
+      const result = validateManifest(bend((m) => {
+        const b = spi(m);
+        if (b) b.misoPin = b.mosiPin;
+      }));
+      expect(result.ok).toBe(false);
+      expect(result.issues.some((i) => i.message.includes('four different pins'))).toBe(true);
+    });
+
+    it('warns about register addressing with no registers', () => {
+      // It would parse, load, and return zero for everything -- indistinguishable from a wiring
+      // fault unless someone says so here.
+      const result = validateManifest(bend((m) => {
+        const b = spi(m);
+        if (b) b.registers = [];
+      }));
+      expect(result.ok).toBe(true);
+      expect(result.issues.some((i) => i.message.includes('stream'))).toBe(true);
+    });
+
+    it('catches a clock limit that looks like a unit slip', () => {
+      const result = validateManifest(bend((m) => {
+        const b = spi(m);
+        if (b) b.maxClockHz = 5;
+      }));
+      expect(result.issues.some((i) => i.message.includes('Kilohertz read as hertz'))).toBe(true);
+    });
   });
 });
 
