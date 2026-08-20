@@ -18,6 +18,17 @@ export {
 export type { ProjectSummary, PublicUser, StoredProject } from './store.js';
 
 export {
+  ACCESS_CAPACITY,
+  ACCESS_COOLDOWN_MS,
+  ACCESS_GRACE_MS,
+  ACCESS_IDLE_MS,
+  ACCESS_SESSION_MS,
+  AccessController,
+  CooldownError,
+} from './access.js';
+export type { AccessConfig, AccessState, AccessStatus } from './access.js';
+
+export {
   MAX_PASSWORD_LENGTH,
   MIN_PASSWORD_LENGTH,
   WeakPasswordError,

@@ -39,6 +39,7 @@ import SkipNextIcon from '@mui/icons-material/SkipNext';
 import UndoIcon from '@mui/icons-material/Undo';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlineOutlined';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import CloudDoneIcon from '@mui/icons-material/CloudDone';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
@@ -46,7 +47,9 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import LogoutIcon from '@mui/icons-material/Logout';
 import { EXAMPLES, emptyProject } from '@robo-journey/parts';
 import { compileSketch, CompileUnavailableError } from './api.ts';
-import { createProject, logout as logoutRequest, saveProject } from './auth.ts';
+import { createProject, saveProject } from './auth.ts';
+import type { AccessGate } from './useAccess.ts';
+import { formatDuration } from './panels/AccessGate.tsx';
 import { downloadProject, openProjectFile } from './projectFile.ts';
 import { useStudio } from './store.ts';
 import type { SimulationController } from './sim/useSimulation.ts';
@@ -80,16 +83,17 @@ interface Props {
   sim: SimulationController;
   actions: MenuBarActions | null;
   onOpenDatasheet(): void;
-  onOpenAccount(): void;
   onOpenCloudProjects(): void;
+  /** The seat this session is running on, for the countdown and for signing out. */
+  gate: AccessGate;
 }
 
 export function MenuBar({
   sim,
   actions,
   onOpenDatasheet,
-  onOpenAccount,
   onOpenCloudProjects,
+  gate,
 }: Props) {
   const project = useStudio((s) => s.project);
   const snapshot = useStudio((s) => s.snapshot);
@@ -171,10 +175,9 @@ export function MenuBar({
    */
   const saveToAccount = useCallback(async () => {
     const store = useStudio.getState();
-    if (!store.user) {
-      onOpenAccount();
-      return;
-    }
+    // Unreachable in practice -- the workspace only mounts for a signed-in account -- but the
+    // store's copy of the user is a mirror, so this stays rather than assuming it.
+    if (!store.user) return;
     try {
       if (store.cloudProjectId) {
         await saveProject(store.cloudProjectId, store.project.name, store.project);
@@ -186,17 +189,11 @@ export function MenuBar({
     } catch (caught) {
       store.setSyncState(store.syncedAt, (caught as Error).message);
     }
-  }, [onOpenAccount]);
-
-  const signOut = useCallback(async () => {
-    try {
-      await logoutRequest();
-    } catch {
-      // Even if the request fails the local session should end; the cookie is cleared server-side
-      // on the next successful call, and leaving the UI signed in would be worse.
-    }
-    useStudio.getState().setUser(null);
   }, []);
+
+  // Signing out gives the seat back as well as ending the session, so whoever is waiting gets it
+  // straight away rather than after the heartbeat grace expires.
+  const signOut = useCallback(() => void gate.signOut(), [gate]);
 
   const open = useCallback(async () => {
     try {
@@ -378,16 +375,14 @@ export function MenuBar({
                 onClick: () => void saveToAccount(),
               },
               { divider: true },
-              { label: 'Sign out', icon: <LogoutIcon fontSize="small" />, onClick: () => void signOut() },
-            ]
-          : [
               {
-                label: 'Sign in or create an account',
-                icon: <AccountCircleIcon fontSize="small" />,
-                secondary: 'Syncs your circuits across machines. Everything works without one.',
-                onClick: onOpenAccount,
+                label: 'End session and sign out',
+                icon: <LogoutIcon fontSize="small" />,
+                secondary: 'Frees your seat. The 20-minute wait applies either way.',
+                onClick: signOut,
               },
-            ],
+            ]
+          : [],
       },
       {
         id: 'help',
@@ -408,7 +403,7 @@ export function MenuBar({
     ],
     [
       actions, build, buildAndRun, cloudProjectId, close, future.length, hex, loadExample,
-      newProject, onOpenAccount, onOpenCloudProjects, onOpenDatasheet, open, past.length, save,
+      newProject, onOpenCloudProjects, onOpenDatasheet, open, past.length, save,
       saveToAccount, selection, signOut, sim, snapshot.running, unplugSelection, user,
     ],
   );
@@ -503,6 +498,7 @@ export function MenuBar({
 
         <Box sx={{ flex: 1 }} />
 
+        <SeatCountdown expiresAt={gate.access?.expiresAt ?? null} />
         <SyncStatus
           user={user}
           syncedAt={syncedAt}
@@ -585,6 +581,56 @@ export function MenuBar({
         {error && <Chip size="small" color="error" label={error} onDelete={() => setError(null)} />}
       </Toolbar>
     </AppBar>
+  );
+}
+
+/**
+ * How much of the hour is left.
+ *
+ * Present at all times rather than appearing near the end, because the whole point is that the
+ * limit should never be a surprise: someone deciding whether to start a big change wants to know
+ * they have forty minutes, not to be told at two.
+ *
+ * Colour carries the urgency -- amber under five minutes, red under one -- so it reads at a glance
+ * without anyone having to parse the number.
+ */
+function SeatCountdown({ expiresAt }: { expiresAt: string | null }) {
+  const [remaining, setRemaining] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!expiresAt) {
+      setRemaining(null);
+      return;
+    }
+    const at = new Date(expiresAt).getTime();
+    const tick = () => setRemaining(Math.max(0, at - Date.now()));
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [expiresAt]);
+
+  if (remaining === null) return null;
+
+  const minutes = remaining / 60_000;
+  const colour = minutes < 1 ? 'error' : minutes < 5 ? 'warning' : 'default';
+
+  return (
+    <Tooltip
+      title={
+        minutes < 5
+          ? 'Your hour is nearly up. Save anything you want to keep — a 20-minute wait follows.'
+          : 'Time left in this session. Ten people can use the simulator at once, an hour each.'
+      }
+    >
+      <Chip
+        size="small"
+        variant="outlined"
+        color={colour}
+        icon={<AccessTimeIcon />}
+        label={formatDuration(remaining)}
+        sx={{ fontVariantNumeric: 'tabular-nums', mr: 1 }}
+      />
+    </Tooltip>
   );
 }
 

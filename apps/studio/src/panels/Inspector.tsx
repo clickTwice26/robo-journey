@@ -79,7 +79,7 @@ function PartReadouts() {
                     color: value.alarm ? 'error.main' : 'text.primary',
                   }}
                 >
-                  <Typography variant="caption" color="text.secondary" display="block">
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                     {value.label}
                   </Typography>
                   <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>

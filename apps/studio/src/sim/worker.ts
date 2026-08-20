@@ -201,9 +201,11 @@ class Simulation implements SimApi {
     const brightness: Record<string, number> = {};
     const readouts: Record<string, readonly DeviceReadout[]> = {};
     for (const [partId, device] of devices) {
-      if (device instanceof Led) brightness[partId] = device.brightness;
+      // Before the `instanceof` below: narrowing leaves the value as `Device | Led`, and `Led` has
+      // no `readout` of its own, so the optional call has to happen while it is still a `Device`.
       const values = device.readout?.();
       if (values && values.length > 0) readouts[partId] = values;
+      if (device instanceof Led) brightness[partId] = device.brightness;
     }
 
     const serial = this.serialBuffer;

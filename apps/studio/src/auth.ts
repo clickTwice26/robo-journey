@@ -13,6 +13,33 @@ export interface User {
   readonly createdAt: string;
 }
 
+/** Where an account stands in the queue. Mirrors the server's `AccessStatus`. */
+export interface AccessStatus {
+  readonly state: 'idle' | 'queued' | 'active' | 'cooldown';
+  readonly position: number | null;
+  readonly waiting: number;
+  readonly active: number;
+  readonly capacity: number;
+  readonly expiresAt: string | null;
+  readonly cooldownUntil: string | null;
+  readonly estimatedWaitMs: number | null;
+  /** Why the last seat ended, so the queue screen can explain itself. */
+  readonly lastReason: 'idle' | 'expired' | null;
+  /** Time still owed from an interrupted session, carried back on re-admission. */
+  readonly carriedMs: number | null;
+}
+
+export interface Occupancy {
+  readonly active: number;
+  readonly waiting: number;
+  readonly capacity: number;
+}
+
+export interface Session {
+  readonly user: User | null;
+  readonly access: AccessStatus | null;
+}
+
 export interface ProjectSummary {
   readonly id: string;
   readonly name: string;
@@ -40,12 +67,31 @@ export class ServiceUnreachableError extends AuthError {
   }
 }
 
+/**
+ * Refused because the account has no seat right now.
+ *
+ * Carries the access status the server sent with the refusal, so the app can go straight to
+ * showing the queue rather than asking where it stands in a second request.
+ */
+export class NoAccessError extends AuthError {
+  constructor(
+    message: string,
+    readonly access: AccessStatus | null,
+  ) {
+    super(message, 403);
+    this.name = 'NoAccessError';
+  }
+}
+
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`/api${path}`, {
       ...init,
-      headers: { 'Content-Type': 'application/json', ...init.headers },
+      // Only when there is something to describe. Declaring JSON and then sending nothing is a
+      // 400 from Fastify -- "body cannot be empty when content-type is set" -- which is exactly
+      // what every bodyless POST here does: joining the queue, the heartbeat, signing out.
+      headers: init.body === undefined ? { ...init.headers } : { 'Content-Type': 'application/json', ...init.headers },
       // Same-origin through the proxy, but explicit: without it the session cookie is not sent.
       credentials: 'same-origin',
     });
@@ -53,37 +99,79 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ServiceUnreachableError();
   }
 
-  const body = (await response.json().catch(() => ({}))) as { error?: string };
+  const body = (await response.json().catch(() => ({}))) as {
+    error?: string;
+    access?: AccessStatus;
+  };
   if (!response.ok) {
+    if (response.status === 403 && body.access) {
+      throw new NoAccessError(body.error ?? 'No active session.', body.access);
+    }
     throw new AuthError(body.error ?? `Request failed (${response.status})`, response.status);
   }
   return body as T;
 }
 
-/** Who is signed in, or null. Also the liveness check for the service. */
-export async function fetchCurrentUser(): Promise<User | null> {
-  const { user } = await call<{ user: User | null }>('/auth/me');
-  return user;
+/**
+ * Who is signed in and where they stand, or nulls. Also the liveness check for the service.
+ *
+ * Both in one call because the app cannot decide what to render from either alone: an identity
+ * without a seat means the queue, not the workspace.
+ */
+export async function fetchSession(): Promise<Session> {
+  return call<Session>('/auth/me');
 }
 
 export async function register(
   email: string,
   password: string,
   displayName: string,
-): Promise<User> {
-  const { user } = await call<{ user: User }>('/auth/register', {
+): Promise<Session> {
+  return call<Session>('/auth/register', {
     method: 'POST',
     body: JSON.stringify({ email, password, displayName }),
   });
-  return user;
 }
 
-export async function login(email: string, password: string): Promise<User> {
-  const { user } = await call<{ user: User }>('/auth/login', {
+export async function login(email: string, password: string): Promise<Session> {
+  return call<Session>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });
-  return user;
+}
+
+// --- Access -------------------------------------------------------------------------------------
+
+/** How busy the simulator is. The only call here that works signed out. */
+export async function fetchOccupancy(): Promise<Occupancy> {
+  const { occupancy } = await call<{ occupancy: Occupancy }>('/access/occupancy');
+  return occupancy;
+}
+
+/** Ask for a seat, or rejoin the queue after a cooldown. */
+export async function requestAccess(): Promise<AccessStatus> {
+  const { access } = await call<{ access: AccessStatus }>('/access', { method: 'POST' });
+  return access;
+}
+
+/**
+ * Say we are still here, and find out whether anything has changed.
+ *
+ * Doubles as the poll: it is how the app learns it has been admitted from the queue and how it
+ * learns its hour is over, so there is nothing else to poll.
+ */
+export async function heartbeat(present: boolean): Promise<AccessStatus> {
+  const { access } = await call<{ access: AccessStatus }>('/access/heartbeat', {
+    method: 'POST',
+    body: JSON.stringify({ present }),
+  });
+  return access;
+}
+
+/** Give up a seat or a place in the queue. */
+export async function releaseAccess(): Promise<AccessStatus> {
+  const { access } = await call<{ access: AccessStatus }>('/access/release', { method: 'POST' });
+  return access;
 }
 
 export async function logout(): Promise<void> {

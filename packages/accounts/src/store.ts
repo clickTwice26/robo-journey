@@ -10,6 +10,7 @@
  */
 import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { AccessController, type AccessConfig } from './access.js';
 import {
   deserializeHash,
   hashPassword,
@@ -73,12 +74,23 @@ function hashToken(token: string): string {
 export class AccountStore {
   private readonly db: DatabaseSync;
 
-  constructor(filename = 'robo-journey.db') {
+  /**
+   * Who may use the simulator right now.
+   *
+   * Kept as its own object rather than folded in here: identity and capacity answer different
+   * questions and change for different reasons, and one is enforced on every request while the
+   * other is checked once at sign-in.
+   */
+  readonly access: AccessController;
+
+  constructor(filename = 'robo-journey.db', accessConfig: AccessConfig = {}) {
     this.db = new DatabaseSync(filename);
     // WAL keeps reads from blocking writes, which matters once autosave is writing continuously.
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec('PRAGMA foreign_keys = ON');
     this.migrate();
+    // After `migrate`, because the access table has a foreign key into users.
+    this.access = new AccessController(this.db, accessConfig);
   }
 
   private migrate(): void {

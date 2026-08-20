@@ -11,6 +11,7 @@
 import type { FastifyInstance } from 'fastify';
 import { extractManifest, DatasheetExtractionError } from '@robo-journey/datasheet';
 import { validateManifest } from '@robo-journey/parts';
+import type { Guards } from './session-guard.js';
 
 /**
  * Largest datasheet accepted, bytes.
@@ -33,13 +34,21 @@ export interface ExtractBody {
   model?: string;
 }
 
-export function registerDatasheetRoutes(app: FastifyInstance): void {
+export interface DatasheetRouteOptions {
+  readonly guards: Guards;
+}
+
+export function registerDatasheetRoutes(app: FastifyInstance, options: DatasheetRouteOptions): void {
   app.get('/datasheet/status', async () => ({
     // Whether extraction is available at all, without ever revealing the key itself.
     configured: Boolean(process.env.GEMINI_API_KEY),
   }));
 
   app.post<{ Body: ExtractBody }>('/datasheet/extract', async (request, reply) => {
+    // An extraction costs real money, so it is squarely one of the things the seat limit exists
+    // to ration.
+    if (!options.guards.requireSeat(request, reply)) return reply;
+
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return reply.status(503).send({

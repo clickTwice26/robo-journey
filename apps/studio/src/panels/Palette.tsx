@@ -20,6 +20,7 @@ import { useState } from 'react';
 import { allParts, isRegistered, partDefinition } from '@robo-journey/parts';
 import { useStudio } from '../store.ts';
 import { DatasheetDialog } from './DatasheetDialog.tsx';
+import type { SimulationController } from '../sim/useSimulation.ts';
 
 const CATEGORY_LABELS: Record<string, string> = {
   board: 'Boards',
@@ -29,7 +30,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   power: 'Power',
 };
 
-export function PalettePanel() {
+export function PalettePanel({ sim }: { sim: SimulationController }) {
   const mode = useStudio((s) => s.mode);
   const setMode = useStudio((s) => s.setMode);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -60,6 +61,7 @@ export function PalettePanel() {
       </Button>
 
       <DatasheetDialog
+        sim={sim}
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         onAdded={() => setGeneration((g) => g + 1)}

@@ -10,26 +10,31 @@
  * in development.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import cookie from '@fastify/cookie';
 import {
   AccountError,
   AccountStore,
+  CooldownError,
   EmailInUseError,
   InvalidCredentialsError,
   NotFoundError,
   SESSION_TTL_MS,
   WeakPasswordError,
-  type PublicUser,
+  type AccessStatus,
 } from '@robo-journey/accounts';
 import { RateLimiter } from './rate-limit.js';
-
-const SESSION_COOKIE = 'rj_session';
+import { SESSION_COOKIE, type Guards } from './session-guard.js';
 
 /**
  * Limits.
  *
  * Login is the tighter one because it is the endpoint worth guessing at. Registration is limited
- * mostly to stop a script filling the database.
+ * only to stop a script filling the database.
+ *
+ * The registration limit is per address, and a shared network is one address: a class of thirty
+ * signing up at once is one IP making thirty requests, which is indistinguishable from abuse by
+ * shape alone. It is set high enough for that to work, because accounts are free and are not the
+ * scarce thing here -- seats are, and they are limited separately and absolutely. A stricter
+ * limit would protect a row in a table at the cost of locking out a room full of people.
  *
  * Built per server rather than at module scope: shared limiter state would leak between instances,
  * which is wrong for tests that each expect a clean slate and would be wrong again for any setup
@@ -37,9 +42,9 @@ const SESSION_COOKIE = 'rj_session';
  */
 function createLimiters() {
   return {
-    loginByAddress: new RateLimiter(10, 5 * 60 * 1000),
+    loginByAddress: new RateLimiter(30, 5 * 60 * 1000),
     loginByAccount: new RateLimiter(5, 15 * 60 * 1000),
-    registerByAddress: new RateLimiter(5, 60 * 60 * 1000),
+    registerByAddress: new RateLimiter(40, 60 * 60 * 1000),
   };
 }
 
@@ -61,28 +66,28 @@ interface ProjectBody {
 
 export interface AuthRouteOptions {
   readonly store: AccountStore;
+  readonly guards: Guards;
 }
 
-export async function registerAuthRoutes(
-  app: FastifyInstance,
-  options: AuthRouteOptions,
-): Promise<void> {
-  const { store } = options;
+export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptions): void {
+  const { store, guards } = options;
+  const { currentUser, requireUser } = guards;
   const { loginByAddress, loginByAccount, registerByAddress } = createLimiters();
-  await app.register(cookie);
 
-  /** Whoever is signed in, or null. */
-  const currentUser = (request: FastifyRequest): PublicUser | null =>
-    store.resolveSession(request.cookies[SESSION_COOKIE]);
-
-  /** Guard for everything that needs an account. */
-  const requireUser = (request: FastifyRequest, reply: FastifyReply): PublicUser | null => {
-    const user = currentUser(request);
-    if (!user) {
-      void reply.status(401).send({ error: 'Not signed in.' });
-      return null;
+  /**
+   * Join the queue, tolerating a cooldown.
+   *
+   * Signing in during a cooldown is a perfectly ordinary thing to do -- someone comes back to see
+   * how long is left -- so it must not fail the sign-in. The status returned says where they
+   * stand either way.
+   */
+  const requestOrReport = (userId: string): AccessStatus => {
+    try {
+      return store.access.request(userId);
+    } catch (error) {
+      if (error instanceof CooldownError) return store.access.status(userId);
+      throw error;
     }
-    return user;
   };
 
   const setSessionCookie = (request: FastifyRequest, reply: FastifyReply, token: string): void => {
@@ -128,7 +133,9 @@ export async function registerAuthRoutes(
 
   app.get('/auth/me', async (request, reply) => {
     const user = currentUser(request);
-    return reply.send({ user });
+    // The access status travels with the identity, so the app can decide in one request whether to
+    // show the workspace, the queue or the countdown.
+    return reply.send({ user, access: user ? store.access.status(user.id) : null });
   });
 
   app.post<{ Body: Credentials }>('/auth/register', async (request, reply) => {
@@ -151,8 +158,9 @@ export async function registerAuthRoutes(
       const session = store.createSession(user.id);
       setSessionCookie(request, reply, session.token);
       // Signed in immediately: making someone log in again right after registering is friction
-      // with no security benefit.
-      return reply.status(201).send({ user });
+      // with no security benefit. Registration is free and unlimited -- it is the *seat* that is
+      // rationed -- so a new account goes straight into the queue like any other.
+      return reply.status(201).send({ user, access: requestOrReport(user.id) });
     } catch (error) {
       return sendAccountError(reply, error);
     }
@@ -181,13 +189,20 @@ export async function registerAuthRoutes(
       // A successful sign-in clears the account's counter, so one forgotten password does not
       // lock someone out for the rest of the window.
       loginByAccount.reset(`login:${email.trim().toLowerCase()}`);
-      return reply.send({ user });
+      // Signing in is what puts someone in the queue: there is no separate button to press, and
+      // no state where they are signed in and have not asked for a seat.
+      return reply.send({ user, access: requestOrReport(user.id) });
     } catch (error) {
       return sendAccountError(reply, error);
     }
   });
 
   app.post('/auth/logout', async (request, reply) => {
+    // Give the seat back on the way out, so signing out frees it for whoever is waiting rather
+    // than leaving it held by nobody until the heartbeat grace runs out.
+    const user = currentUser(request);
+    if (user) store.access.release(user.id);
+
     store.destroySession(request.cookies[SESSION_COOKIE]);
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
     return reply.send({ ok: true });
@@ -196,9 +211,66 @@ export async function registerAuthRoutes(
   app.post('/auth/logout-everywhere', async (request, reply) => {
     const user = requireUser(request, reply);
     if (!user) return reply;
+    store.access.release(user.id);
     store.destroyAllSessions(user.id);
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
     return reply.send({ ok: true });
+  });
+
+  // --- Access ------------------------------------------------------------------------------------
+
+  /**
+   * How busy the place is. The only endpoint here that needs no account.
+   *
+   * Shown on the sign-in screen, so someone can see there is a queue before typing a password
+   * rather than after.
+   */
+  app.get('/access/occupancy', async (_request, reply) =>
+    reply.send({ occupancy: store.access.occupancy() }),
+  );
+
+  app.get('/access', async (request, reply) => {
+    const user = requireUser(request, reply);
+    if (!user) return reply;
+    return reply.send({ access: store.access.status(user.id) });
+  });
+
+  app.post('/access', async (request, reply) => {
+    const user = requireUser(request, reply);
+    if (!user) return reply;
+
+    try {
+      return reply.send({ access: store.access.request(user.id) });
+    } catch (error) {
+      if (error instanceof CooldownError) {
+        return reply
+          .status(429)
+          .header('Retry-After', Math.ceil((error.until.getTime() - Date.now()) / 1000))
+          .send({ error: error.message, access: store.access.status(user.id) });
+      }
+      throw error;
+    }
+  });
+
+  /**
+   * Still here.
+   *
+   * Polled by anyone queued or holding a seat. It is also how the client learns it has been
+   * admitted, or that its hour is over, so it doubles as the status endpoint while waiting.
+   */
+  app.post<{ Body: { present?: boolean } }>('/access/heartbeat', async (request, reply) => {
+    const user = requireUser(request, reply);
+    if (!user) return reply;
+    // Absent means the page is open but nobody is at it. Defaults to present so a client that
+    // does not report it is never punished for the omission.
+    const present = request.body?.present !== false;
+    return reply.send({ access: store.access.heartbeat(user.id, present) });
+  });
+
+  app.post('/access/release', async (request, reply) => {
+    const user = requireUser(request, reply);
+    if (!user) return reply;
+    return reply.send({ access: store.access.release(user.id) });
   });
 
   // --- Projects -----------------------------------------------------------------------------------
