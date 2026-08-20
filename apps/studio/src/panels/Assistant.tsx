@@ -25,6 +25,8 @@ import SendIcon from '@mui/icons-material/Send';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import TokenIcon from '@mui/icons-material/Toll';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   AuthError,
   InsufficientCreditsError,
@@ -56,6 +58,68 @@ const OPENERS = [
   'Why is the simulation reporting that fault?',
   'What should I check first?',
 ];
+
+/**
+ * An answer, rendered as the markdown it is.
+ *
+ * The model writes fenced code, inline code and lists because that is what it has been asked for,
+ * and showing the fences and backticks as literal characters made every answer containing a sketch
+ * fragment hard to read -- which is most of the useful ones.
+ *
+ * Raw HTML is not enabled, which is the default and worth keeping: this is model output rendered
+ * into the page, and the one thing it must never be able to do is bring its own markup.
+ */
+function Answer({ text }: { text: string }) {
+  return (
+    <Box
+      sx={{
+        fontSize: 13,
+        lineHeight: 1.6,
+        wordBreak: 'break-word',
+        '& p': { my: 0.75 },
+        '& p:first-of-type': { mt: 0 },
+        '& p:last-child': { mb: 0 },
+        '& ul, & ol': { my: 0.75, pl: 2.5 },
+        '& li': { mb: 0.25 },
+        '& h1, & h2, & h3, & h4': { fontSize: 13, fontWeight: 700, mt: 1.5, mb: 0.5 },
+        '& a': { color: 'primary.main' },
+        // Inline code sits inside a sentence, so it takes a tint and no border -- a boxed span
+        // mid-paragraph breaks the line rhythm badly at this size.
+        '& code': {
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          fontSize: '0.92em',
+          bgcolor: 'action.hover',
+          px: 0.5,
+          py: 0.15,
+          borderRadius: 0.5,
+        },
+        // A block is a block: its own frame, and its own scrollbar rather than forcing the whole
+        // panel sideways when a line of C++ is long.
+        '& pre': {
+          my: 1,
+          p: 1.25,
+          bgcolor: 'action.hover',
+          border: 1,
+          borderColor: 'divider',
+          borderRadius: 1,
+          overflowX: 'auto',
+        },
+        '& pre code': { bgcolor: 'transparent', p: 0, fontSize: 12, lineHeight: 1.5 },
+        '& table': { borderCollapse: 'collapse', my: 1, fontSize: 12 },
+        '& th, & td': { border: 1, borderColor: 'divider', px: 0.75, py: 0.4 },
+        '& blockquote': {
+          my: 1,
+          pl: 1.25,
+          borderLeft: 3,
+          borderColor: 'divider',
+          color: 'text.secondary',
+        },
+      }}
+    >
+      <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>
+    </Box>
+  );
+}
 
 export function AssistantPanel() {
   const project = useStudio((state) => state.project);
@@ -207,12 +271,16 @@ export function AssistantPanel() {
               {turn.role === 'user' ? 'You' : 'Assistant'}
               {turn.credits !== undefined && ` · ${turn.credits} credit${turn.credits === 1 ? '' : 's'}`}
             </Typography>
-            <Typography
-              variant="body2"
-              sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, wordBreak: 'break-word' }}
-            >
-              {turn.content}
-            </Typography>
+            {turn.role === 'user' ? (
+              <Typography
+                variant="body2"
+                sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, wordBreak: 'break-word' }}
+              >
+                {turn.content}
+              </Typography>
+            ) : (
+              <Answer text={turn.content} />
+            )}
           </Box>
         ))}
 

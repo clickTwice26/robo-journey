@@ -83,6 +83,37 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 const MOD = isMac ? '⌘' : 'Ctrl+';
 const shortcut = (key: string): string => `${MOD}${key}`;
 
+/**
+ * Bindings the browser owns, and which this application therefore does not take.
+ *
+ * Reload is the one that matters. Taking Ctrl+R for "build and run" means someone who wants to
+ * reload the page instead recompiles their sketch, and there is no way for them to find out why
+ * short of guessing. The same goes for the zoom trio: a canvas that intercepts Ctrl+plus leaves
+ * people unable to make the interface itself bigger.
+ *
+ * Reserved by every major browser on both platforms:
+ *   R (reload) · T, W, N (tabs and windows) · L (address bar) · D (bookmark) · P (print)
+ *   F, G (find) · +, -, 0 (page zoom) · 1-9 (tab switching) · Q, H, M (macOS system)
+ *
+ * S and O are taken deliberately. Both have a browser meaning -- save page, open file -- but every
+ * editor on the web overrides them and people expect that; nobody reaches for Ctrl+S in a document
+ * wanting a copy of the HTML.
+ */
+
+/**
+ * Whether a keystroke belongs to whatever is being typed into.
+ *
+ * Single-key bindings are only safe with this: `1` has to mean "fit the circuit" on the canvas and
+ * the digit one inside the sketch. Monaco is checked by class because it is not a plain input.
+ */
+function isTyping(): boolean {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement)) return false;
+  if (active.isContentEditable) return true;
+  if (active.closest('.monaco-editor')) return true;
+  return active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT';
+}
+
 interface Props {
   sim: SimulationController;
   actions: MenuBarActions | null;
@@ -227,6 +258,18 @@ export function MenuBar({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const mod = isMac ? event.metaKey : event.ctrlKey;
+
+      // Unmodified keys, which only apply when nothing is being typed into.
+      if (!mod && !event.altKey) {
+        if (isTyping()) return;
+        // Figma's binding for the same action, and free of any browser meaning -- unlike the
+        // Ctrl+0 that would be the obvious choice and is page zoom everywhere.
+        if (event.key === '1') {
+          event.preventDefault();
+          useStudio.getState().canvasControls?.fit();
+        }
+        return;
+      }
       if (!mod) return;
 
       // Monaco owns undo inside the editor; intercepting it there would break text editing.
@@ -249,22 +292,11 @@ export function MenuBar({
           event.preventDefault();
           void build();
           break;
-        case 'r':
+        case 'enter':
+          // Not R. Ctrl+R is reload in every browser, and taking it means someone who wants to
+          // reload recompiles their sketch instead with no way to work out why.
           event.preventDefault();
           void buildAndRun();
-          break;
-        case '=':
-        case '+':
-          event.preventDefault();
-          useStudio.getState().canvasControls?.zoomIn();
-          break;
-        case '-':
-          event.preventDefault();
-          useStudio.getState().canvasControls?.zoomOut();
-          break;
-        case '0':
-          event.preventDefault();
-          useStudio.getState().canvasControls?.fit();
           break;
         case 'z':
           if (inEditor) return;
@@ -348,21 +380,21 @@ export function MenuBar({
           {
             label: 'Zoom in',
             icon: <ZoomInIcon fontSize="small" />,
-            hint: shortcut('='),
+            // No keyboard hint: the browser owns every plausible zoom binding, so this is the
+            // button, the canvas controls, and the scroll wheel.
             disabled: !canvasControls,
             onClick: () => canvasControls?.zoomIn(),
           },
           {
             label: 'Zoom out',
             icon: <ZoomOutIcon fontSize="small" />,
-            hint: shortcut('-'),
             disabled: !canvasControls,
             onClick: () => canvasControls?.zoomOut(),
           },
           {
             label: 'Fit circuit to view',
             icon: <FitScreenIcon fontSize="small" />,
-            hint: shortcut('0'),
+            hint: '1',
             disabled: !canvasControls,
             onClick: () => canvasControls?.fit(),
           },
@@ -381,7 +413,7 @@ export function MenuBar({
         label: 'Simulate',
         items: [
           { label: 'Compile', icon: <BuildIcon fontSize="small" />, hint: shortcut('B'), onClick: () => void build() },
-          { label: 'Build & Run', icon: <PlayArrowIcon fontSize="small" />, hint: shortcut('R'), onClick: () => void buildAndRun() },
+          { label: 'Build & Run', icon: <PlayArrowIcon fontSize="small" />, hint: shortcut('↵'), onClick: () => void buildAndRun() },
           { label: snapshot.running ? 'Pause' : 'Run', icon: snapshot.running ? <PauseIcon fontSize="small" /> : <PlayArrowIcon fontSize="small" />, disabled: !hex, onClick: () => (snapshot.running ? sim.pause() : sim.start()) },
           { divider: true },
           { label: 'Step one instruction', icon: <SkipNextIcon fontSize="small" />, disabled: !hex, onClick: () => sim.stepInstruction() },
@@ -435,7 +467,9 @@ export function MenuBar({
           },
           {
             label: 'Keyboard shortcuts',
-            secondary: `${shortcut('B')} compile · ${shortcut('R')} build & run · ${shortcut('S')} save · ${shortcut('O')} open · ${shortcut('Z')} undo · Del remove`,
+            secondary:
+              `${shortcut('↵')} build & run · ${shortcut('B')} compile · ${shortcut('S')} save · ` +
+              `${shortcut('O')} open · ${shortcut('Z')} undo · 1 fit to view · Del remove`,
             onClick: close,
           },
         ],

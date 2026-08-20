@@ -26,6 +26,8 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-konva": "^19.2.5",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
     "uplot": "^1.6.32",
     "zustand": "^5.0.15"
   },
