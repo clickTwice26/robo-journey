@@ -64,6 +64,7 @@ export const PANELS = [
   { id: 'scope', title: 'Scope' },
   { id: 'inspector', title: 'MCU' },
   { id: 'disassembly', title: 'Disassembly' },
+  { id: 'assistant', title: 'Assistant' },
 ] as const;
 
 export interface MenuBarActions {

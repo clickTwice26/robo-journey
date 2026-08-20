@@ -92,10 +92,36 @@ export interface AuthRouteOptions {
   readonly publicUrl: string;
   /** Whether an address must be proved before an account can take a seat. */
   readonly requireVerifiedEmail: boolean;
+  /** Credits a confirmed account starts with. */
+  readonly signupCredits: number;
 }
 
 export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptions): void {
-  const { store, guards, redis, pool, mailer, publicUrl, requireVerifiedEmail } = options;
+  const { store, guards, redis, pool, mailer, publicUrl, requireVerifiedEmail, signupCredits } =
+    options;
+
+  /**
+   * Hand a confirmed account its starting credits.
+   *
+   * Keyed on a reference so it happens once however many times this runs -- a retried request or a
+   * second verification click must not be a second allowance. Granted on confirmation rather than
+   * at signup because an allowance given to an unconfirmed address is an allowance given to
+   * anybody who can type one.
+   */
+  const grantSignupCredits = async (userId: string): Promise<void> => {
+    if (signupCredits <= 0) return;
+    try {
+      await store.credits.grant(userId, signupCredits, {
+        reason: 'Welcome to robo-journey',
+        feature: 'signup',
+        reference: 'signup',
+      });
+    } catch (error) {
+      // The account is verified either way; credits can be added by hand. Failing the request here
+      // would leave someone unable to get in over a bookkeeping problem.
+      app.log.error({ err: error, userId }, 'could not grant signup credits');
+    }
+  };
   const { currentUser, requireUser } = guards;
   const { loginByAddress, loginByAccount, registerByAddress, mailByAccount, mailByAddress } =
     createLimiters(redis);
@@ -193,9 +219,13 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
 
   app.get('/auth/me', async (request, reply) => {
     const user = await currentUser(request);
-    // The access status travels with the identity, so the app can decide in one request whether to
-    // show the workspace, the queue or the countdown.
-    return reply.send({ user, access: user ? await store.access.status(user.id) : null });
+    // The access status and the balance travel with the identity: the app needs all three to
+    // decide what to render, and three round trips to draw one screen is three too many.
+    return reply.send({
+      user,
+      access: user ? await store.access.status(user.id) : null,
+      credits: user ? await store.credits.balance(user.id) : null,
+    });
   });
 
   app.post<{ Body: Credentials }>('/auth/register', async (request, reply) => {
@@ -219,6 +249,8 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
       setSessionCookie(request, reply, session.token);
 
       const mailSent = requireVerifiedEmail ? await sendLink(user.id, user.email, 'verify') : true;
+      // Nothing to confirm when confirmation is switched off, so the allowance is due now.
+      if (!requireVerifiedEmail) await grantSignupCredits(user.id);
       // Signed in immediately: making someone log in again right after registering is friction
       // with no security benefit. Registration is free and unlimited -- it is the *seat* that is
       // rationed -- so a new account goes straight into the queue like any other.
@@ -300,6 +332,7 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
     try {
       const { userId } = await consumeEmailToken(pool, token, 'verify');
       await store.markEmailVerified(userId);
+      await grantSignupCredits(userId);
       const user = await store.findUser(userId);
 
       // Signed in on the spot when the link is opened in the browser that already holds the

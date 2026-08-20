@@ -130,6 +130,50 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX email_tokens_expires ON email_tokens (expires_at);
     `,
   },
+  {
+    id: 5,
+    name: 'credits',
+    sql: `
+      -- Balance in whole credits. An integer, never a float: money-like quantities that are
+      -- added and subtracted thousands of times must not accumulate representation error, and
+      -- "you have 4.999999 credits" is not a sentence anyone should read.
+      CREATE TABLE credit_accounts (
+        user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        balance    BIGINT NOT NULL DEFAULT 0 CHECK (balance >= 0),
+        -- Held against work in flight. Deducted from the balance already; this records how much of
+        -- the deduction is provisional so a crash can be reconciled.
+        held       BIGINT NOT NULL DEFAULT 0 CHECK (held >= 0),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE TYPE credit_entry_kind AS ENUM ('grant', 'hold', 'settle', 'release', 'adjustment');
+
+      -- Every movement, in order. The balance could be derived from this and is stored separately
+      -- only so reading it is one row rather than a sum over history -- which means the two must
+      -- move together, in one transaction, always.
+      CREATE TABLE credit_ledger (
+        id            BIGSERIAL PRIMARY KEY,
+        user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind          credit_entry_kind NOT NULL,
+        -- Signed: negative takes credits away. Reading the sign off the kind would mean encoding
+        -- the same fact twice and eventually disagreeing with itself.
+        delta         BIGINT NOT NULL,
+        balance_after BIGINT NOT NULL,
+        -- What it was for, in words, for the history someone actually reads.
+        reason        TEXT NOT NULL,
+        -- What it was for, machine-readable: 'chat', 'datasheet', 'agent'.
+        feature       TEXT NOT NULL,
+        -- Ties a settle or a release back to the hold it resolves.
+        hold_id       BIGINT REFERENCES credit_ledger(id),
+        metadata      JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX credit_ledger_user ON credit_ledger (user_id, created_at DESC);
+      -- Finding holds that were never resolved, which is what a crash leaves behind.
+      CREATE INDEX credit_ledger_open_holds ON credit_ledger (user_id)
+        WHERE kind = 'hold';
+    `,
+  },
 ];
 
 /** Bring the schema up to date. Safe to run concurrently from any number of instances. */

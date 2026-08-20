@@ -34,6 +34,15 @@ export {
 } from './email-tokens.js';
 export type { ConsumedToken, EmailTokenKind, IssuedToken, TokenFailure } from './email-tokens.js';
 
+export { CreditStore, InsufficientCreditsError } from './credits.js';
+export type {
+  CreditBalance,
+  CreditEntryKind,
+  CreditFeature,
+  Hold,
+  LedgerEntry,
+} from './credits.js';
+
 export {
   ACCESS_CAPACITY,
   ACCESS_MAX_COOLDOWN_MS,

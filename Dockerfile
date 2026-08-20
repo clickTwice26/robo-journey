@@ -44,6 +44,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/sim-core/package.json    packages/sim-core/
 COPY packages/parts/package.json       packages/parts/
+COPY packages/assistant/package.json   packages/assistant/
 COPY packages/datasheet/package.json   packages/datasheet/
 COPY packages/accounts/package.json    packages/accounts/
 COPY packages/compile-service/package.json packages/compile-service/
@@ -91,6 +92,8 @@ COPY --from=build /app/packages/sim-core/dist        ./packages/sim-core/dist
 COPY --from=build /app/packages/sim-core/package.json ./packages/sim-core/
 COPY --from=build /app/packages/parts/dist           ./packages/parts/dist
 COPY --from=build /app/packages/parts/package.json   ./packages/parts/
+COPY --from=build /app/packages/assistant/dist       ./packages/assistant/dist
+COPY --from=build /app/packages/assistant/package.json ./packages/assistant/
 COPY --from=build /app/packages/datasheet/dist       ./packages/datasheet/dist
 COPY --from=build /app/packages/datasheet/package.json ./packages/datasheet/
 COPY --from=build /app/packages/accounts/dist        ./packages/accounts/dist

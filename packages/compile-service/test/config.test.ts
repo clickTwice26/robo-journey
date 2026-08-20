@@ -82,24 +82,40 @@ describe('refusing to start', () => {
     ).not.toThrow();
   });
 
-  it('rejects a mail server pointed at localhost links', () => {
-    // Every link in outgoing mail is built from RJ_PUBLIC_URL, so this would send recipients to
-    // their own machine.
-    expect(() =>
-      loadConfig({ ...base, NODE_ENV: 'production', SMTP_HOST: 'smtp.example.com' }),
-    ).toThrow(/localhost/);
-  });
-
-  it('allows localhost links while mail only goes to the log', () => {
-    // The stack on a laptop sets NODE_ENV=production too, and a localhost link is exactly right
-    // when nothing is being posted anywhere. Keying this off the environment crash-looped it.
-    expect(() => loadConfig({ ...base, NODE_ENV: 'production' })).not.toThrow();
+  it('treats an empty variable as an absent one', () => {
+    // Compose has no way to say "unset": `SMTP_SECURE: ${SMTP_SECURE:-}` passes an empty string,
+    // which failed validation and crash-looped the service.
+    expect(() => loadConfig({ ...base, SMTP_SECURE: '', SMTP_HOST: '' })).not.toThrow();
+    expect(loadConfig({ ...base, SMTP_HOST: '' }).SMTP_HOST).toBeUndefined();
   });
 
   it('names the variable when one is missing', () => {
     expect(() => loadConfig({ REDIS_URL: 'redis://localhost:6379' } as NodeJS.ProcessEnv)).toThrow(
       /DATABASE_URL/,
     );
+  });
+});
+
+describe('warnings', () => {
+  it('says so when mail links point at localhost, without refusing to start', async () => {
+    // Testing real mail against a local stack is a legitimate thing to be doing. A fatal check
+    // here is not a safety net, it is a crash loop -- which is exactly what it caused.
+    const { configWarnings } = await import('../src/config.js');
+    const config = loadConfig({ ...base, SMTP_HOST: 'smtp.example.com' });
+    expect(configWarnings(config).join(' ')).toMatch(/RJ_PUBLIC_URL/);
+  });
+
+  it('says nothing when the links are public', async () => {
+    const { configWarnings } = await import('../src/config.js');
+    const config = loadConfig({ ...withMail, SMTP_HOST: 'smtp.example.com', RJ_TRUST_PROXY: 'true' });
+    expect(configWarnings(config)).toEqual([]);
+  });
+
+  it('flags https behind an untrusted proxy', async () => {
+    // The session cookie's Secure flag and every per-address rate limit depend on it.
+    const { configWarnings } = await import('../src/config.js');
+    const config = loadConfig({ ...withMail, SMTP_HOST: 'smtp.example.com' });
+    expect(configWarnings(config).join(' ')).toMatch(/RJ_TRUST_PROXY/);
   });
 });
 

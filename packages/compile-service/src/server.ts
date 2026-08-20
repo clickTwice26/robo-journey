@@ -18,6 +18,7 @@ import type { Pool } from 'pg';
 import type { Redis } from 'ioredis';
 import { registerDatasheetRoutes } from './datasheet-route.js';
 import { registerAuthRoutes } from './auth-routes.js';
+import { registerAssistantRoutes } from './assistant-route.js';
 import { createGuards } from './session-guard.js';
 import { CompileCache, createRedis, redisHealthy } from './redis.js';
 import {
@@ -25,7 +26,7 @@ import {
   createSmtpMailer,
   type Mailer,
 } from './mailer.js';
-import { describeConfig, loadConfig, type Config } from './config.js';
+import { configWarnings, describeConfig, loadConfig, type Config } from './config.js';
 import {
   ArduinoCompiler,
   ToolchainUnavailableError,
@@ -132,8 +133,10 @@ export async function createServer(options: CreateServerOptions = {}): Promise<S
       mailer,
       publicUrl: config.RJ_PUBLIC_URL,
       requireVerifiedEmail: config.RJ_REQUIRE_VERIFIED_EMAIL,
+      signupCredits: config.RJ_SIGNUP_CREDITS,
     });
       registerDatasheetRoutes(scope, { guards });
+    registerAssistantRoutes(scope, { store, guards, redis, apiKey: config.GEMINI_API_KEY });
       registerCompileRoute(scope, { guards, compiler, cache });
     },
     { prefix: '/api' },
@@ -298,6 +301,8 @@ function toResponse(result: CompileResult): CompileResponse {
 export async function start(): Promise<ServerParts> {
   const config = loadConfig();
   const parts = await createServer({ config });
+
+  for (const warning of configWarnings(config)) parts.app.log.warn(warning);
 
   await waitForDatabase(parts.pool);
   const applied = await migrate(parts.pool);

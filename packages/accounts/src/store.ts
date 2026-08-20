@@ -12,6 +12,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Pool } from 'pg';
 import { AccessController, type AccessConfig } from './access.js';
+import { CreditStore } from './credits.js';
 import {
   deserializeHash,
   hashPassword,
@@ -109,11 +110,15 @@ export class AccountStore {
    */
   readonly access: AccessController;
 
+  /** The meter on the AI features. Its own object for the same reason `access` is. */
+  readonly credits: CreditStore;
+
   constructor(
     private readonly pool: Pool,
     accessConfig: AccessConfig = {},
   ) {
     this.access = new AccessController(pool, accessConfig);
+    this.credits = new CreditStore(pool);
   }
 
   // --- Users -------------------------------------------------------------------------------------

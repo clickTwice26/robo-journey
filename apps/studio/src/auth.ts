@@ -33,9 +33,33 @@ export interface AccessStatus {
   readonly carriedMs: number | null;
 }
 
+export interface CreditBalance {
+  /** Spendable right now. */
+  readonly available: number;
+  /** Held against a question in flight. */
+  readonly held: number;
+}
+
+export interface LedgerEntry {
+  readonly id: string;
+  readonly kind: string;
+  readonly delta: number;
+  readonly balanceAfter: number;
+  readonly reason: string;
+  readonly feature: string;
+  readonly createdAt: string;
+}
+
+export interface ChatAnswer {
+  readonly answer: string;
+  readonly credits: number;
+  readonly balance: CreditBalance;
+}
+
 export interface Session {
   readonly user: User | null;
   readonly access: AccessStatus | null;
+  readonly credits?: CreditBalance | null;
   /** False when the verification mail could not be sent, so the screen can offer a resend. */
   readonly mailSent?: boolean;
 }
@@ -83,6 +107,17 @@ export class NoAccessError extends AuthError {
   }
 }
 
+export class InsufficientCreditsError extends AuthError {
+  constructor(
+    message: string,
+    readonly required: number,
+    readonly balance: CreditBalance | null,
+  ) {
+    super(message, 402);
+    this.name = 'InsufficientCreditsError';
+  }
+}
+
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
@@ -102,10 +137,21 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const body = (await response.json().catch(() => ({}))) as {
     error?: string;
     access?: AccessStatus;
+    balance?: CreditBalance;
+    required?: number;
   };
   if (!response.ok) {
     if (response.status === 403 && body.access) {
       throw new NoAccessError(body.error ?? 'No active session.', body.access);
+    }
+    // Its own type because the panel offers a different next step: this is not an error to retry,
+    // it is a balance to top up.
+    if (response.status === 402) {
+      throw new InsufficientCreditsError(
+        body.error ?? 'Not enough credits.',
+        body.required ?? 0,
+        body.balance ?? null,
+      );
     }
     throw new AuthError(body.error ?? `Request failed (${response.status})`, response.status);
   }
@@ -172,6 +218,38 @@ export async function resetPassword(token: string, password: string): Promise<vo
   await call('/auth/reset-password', {
     method: 'POST',
     body: JSON.stringify({ token, password }),
+  });
+}
+
+// --- Credits and the assistant ---------------------------------------------------------------------
+
+export async function fetchCredits(): Promise<{
+  balance: CreditBalance;
+  history: LedgerEntry[];
+}> {
+  return call('/credits');
+}
+
+export async function assistantConfigured(): Promise<boolean> {
+  const { configured } = await call<{ configured: boolean }>('/assistant/status');
+  return configured;
+}
+
+/**
+ * Ask the assistant, sending the workspace with the question.
+ *
+ * The workspace goes with every question rather than being remembered server-side: the circuit
+ * changes between questions, and an answer about the circuit as it was two edits ago is worse than
+ * no answer.
+ */
+export async function askAssistant(
+  question: string,
+  workspace: unknown,
+  history: { role: 'user' | 'assistant'; content: string }[],
+): Promise<ChatAnswer> {
+  return call<ChatAnswer>('/assistant/chat', {
+    method: 'POST',
+    body: JSON.stringify({ question, workspace, history }),
   });
 }
 

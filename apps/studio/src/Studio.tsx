@@ -31,6 +31,7 @@ import { PalettePanel } from './panels/Palette.tsx';
 import { ScopePanel } from './panels/Scope.tsx';
 import { InspectorPanel } from './panels/Inspector.tsx';
 import { DisassemblyPanel } from './panels/Disassembly.tsx';
+import { AssistantPanel } from './panels/Assistant.tsx';
 import { DatasheetDialog } from './panels/DatasheetDialog.tsx';
 import { CloudProjectsDialog } from './panels/CloudProjectsDialog.tsx';
 import { restoreLibrary } from './library.ts';
@@ -144,6 +145,7 @@ export function Studio({ gate }: { gate: Gate }) {
       scope: (_props: IDockviewPanelProps) => <ScopePanel sim={sim} />,
       inspector: (_props: IDockviewPanelProps) => <InspectorPanel sim={sim} />,
       disassembly: (_props: IDockviewPanelProps) => <DisassemblyPanel sim={sim} />,
+      assistant: (_props: IDockviewPanelProps) => <AssistantPanel />,
     }),
     [sim],
   );
@@ -174,13 +176,23 @@ export function Studio({ gate }: { gate: Gate }) {
       initialWidth: paletteWidth,
     });
 
-    api.addPanel({
+    const editor = api.addPanel({
       id: 'editor',
       component: 'editor',
       title: 'sketch.ino',
       position: { direction: 'right', referencePanel: workspace },
       initialWidth: editorWidth,
     });
+
+    // Tabbed with the editor rather than in the bottom strip: a conversation needs height, and the
+    // bottom row is where short readouts live.
+    api.addPanel({
+      id: 'assistant',
+      component: 'assistant',
+      title: 'Assistant',
+      position: { referencePanel: editor, direction: 'within' },
+    });
+    editor.api.setActive();
 
     const problems = api.addPanel({
       id: 'problems',

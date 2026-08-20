@@ -79,8 +79,17 @@ const Env = z.object({
     .default('false')
     .transform((value) => value === 'true'),
 
-  /** Gemini key for datasheet extraction. Optional; the feature reports itself unavailable. */
+  /** Gemini key for the AI features. Optional; they report themselves unavailable without it. */
   GEMINI_API_KEY: z.string().optional(),
+
+  /**
+   * Credits a new account starts with.
+   *
+   * Granted once the address is confirmed rather than at signup, for the same reason a seat is:
+   * accounts are free, and an allowance handed to an unconfirmed one is an allowance handed to
+   * anybody who can type an address.
+   */
+  RJ_SIGNUP_CREDITS: z.coerce.number().int().nonnegative().default(500),
 
   /**
    * Whether an address has to be proved before an account can take a seat.
@@ -150,7 +159,14 @@ const SMTP_ALIASES: ReadonlyArray<readonly [canonical: string, legacy: string]> 
 ];
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const merged: NodeJS.ProcessEnv = { ...env };
+  // An unset variable and one set to nothing are the same intent, and Compose has no way to
+  // express the first: `SMTP_SECURE: ${SMTP_SECURE:-}` passes an empty string. Dropping them lets
+  // defaults and optionals apply instead of failing validation on "".
+  const merged: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined && value !== '') merged[key] = value;
+  }
+
   for (const [canonical, legacy] of SMTP_ALIASES) {
     if (merged[canonical] === undefined && merged[legacy] !== undefined) {
       merged[canonical] = merged[legacy];
@@ -178,18 +194,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
           'Without one, nobody who signs up can ever take a seat.',
       );
     }
-    // Only when mail actually leaves the building. A localhost link is exactly right while links
-    // are being printed to the log, which is how the stack runs on a laptop -- and that stack sets
-    // NODE_ENV=production too, so keying this off the environment alone crash-loops it.
-    const localLink = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(config.RJ_PUBLIC_URL);
-    if (config.SMTP_HOST && localLink) {
-      throw new ConfigError(
-        'A mail server is configured but RJ_PUBLIC_URL is still localhost. Every link in ' +
-          'verification and password-reset mail is built from it, so they would point recipients ' +
-          "at their own machine.\nSet RJ_PUBLIC_URL to the address people reach the app at.",
-      );
-    }
-
     return Object.freeze(config);
   }
 
@@ -197,6 +201,40 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     .map((issue) => `  ${issue.path.join('.') || '(root)'}: ${issue.message}`)
     .join('\n');
   throw new ConfigError(`Invalid configuration:\n${problems}`);
+}
+
+/**
+ * Things worth saying at start-up that are not worth refusing to start over.
+ *
+ * The distinction matters and I got it wrong twice: a fatal check that fires on a configuration
+ * somebody is legitimately running -- testing real mail against a local stack, say -- is not a
+ * safety net, it is a crash loop. Fatal is for states where nothing works at all; everything else
+ * belongs here, where it is loud and ignorable.
+ */
+export function configWarnings(config: Config): string[] {
+  const warnings: string[] = [];
+
+  const localLink = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(
+    config.RJ_PUBLIC_URL,
+  );
+  if (config.SMTP_HOST && localLink) {
+    warnings.push(
+      `A mail server is configured but RJ_PUBLIC_URL is ${config.RJ_PUBLIC_URL}. Every link in ` +
+        'verification and password-reset mail is built from it, so anyone opening one on another ' +
+        'machine will not reach this app. Fine while testing from here; set it to the public ' +
+        'address before anyone else signs up.',
+    );
+  }
+
+  if (!config.RJ_TRUST_PROXY && config.RJ_PUBLIC_URL.startsWith('https://')) {
+    warnings.push(
+      'RJ_PUBLIC_URL is https but RJ_TRUST_PROXY is off. Behind a TLS terminator the session ' +
+        'cookie will not be marked Secure, and every per-address rate limit will see the proxy ' +
+        "rather than the client. Set RJ_TRUST_PROXY=true if something in front is terminating TLS.",
+    );
+  }
+
+  return warnings;
 }
 
 /** Values safe to log or return from an endpoint. Never anything secret. */
@@ -214,5 +252,6 @@ export function describeConfig(config: Config): Record<string, unknown> {
     staticAssets: Boolean(config.RJ_STATIC_DIR),
     requireVerifiedEmail: config.RJ_REQUIRE_VERIFIED_EMAIL,
     mail: config.SMTP_HOST ? 'smtp' : 'console',
+    signupCredits: config.RJ_SIGNUP_CREDITS,
   };
 }
