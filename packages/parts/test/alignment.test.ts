@@ -24,7 +24,7 @@ import {
   type BreadboardSpec,
 } from '@robo-journey/sim-core';
 import {
-  EXAMPLES,
+  LIBRARY_PROJECTS,
   PITCH_MM,
   partDefinition,
   splitTerminal,
@@ -60,7 +60,7 @@ function parseHole(name: string): { column: number; row: BreadboardRow } | null 
 const reachesByLead = (category: string): boolean =>
   category === 'board' || category === 'instrument';
 
-describe.each(EXAMPLES.map((e) => [e.name, e] as const))('%s', (_name, example) => {
+describe.each(LIBRARY_PROJECTS.map((e) => [e.name, e] as const))('%s', (_name, example) => {
   const project: Project = example.build();
 
   it('places every leg exactly in the hole it is wired to', () => {

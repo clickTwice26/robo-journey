@@ -51,8 +51,8 @@ export type { EnvironmentSource, Quantity } from './environment.js';
 export { EMISSIONS, STIMULI, environmentSources, isStimulus } from './stimulus.js';
 export type { Emission } from './stimulus.js';
 
-export { EXAMPLES, exampleById } from './examples.js';
-export type { Example } from './examples.js';
+export { LIBRARY, LIBRARY_PROJECTS, libraryProject } from './library.js';
+export type { LibraryGroup, LibraryProject } from './library.js';
 
 // --- Component manifests -------------------------------------------------------------------------
 

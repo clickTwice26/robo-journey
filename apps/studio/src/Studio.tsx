@@ -35,6 +35,7 @@ import { DisassemblyPanel } from './panels/Disassembly.tsx';
 import { AssistantPanel } from './panels/Assistant.tsx';
 import { DatasheetDialog } from './panels/DatasheetDialog.tsx';
 import { CloudProjectsDialog } from './panels/CloudProjectsDialog.tsx';
+import { LibraryDialog } from './panels/LibraryDialog.tsx';
 import { restoreLibrary } from './library.ts';
 import type { AccessGate as Gate } from './useAccess.ts';
 import { AUTOSAVE_DELAY_MS, saveWorkspace } from './persistence.ts';
@@ -87,6 +88,7 @@ export function Studio({ gate }: { gate: Gate }) {
   const apiRef = useRef<DockviewApi | null>(null);
   const [datasheetOpen, setDatasheetOpen] = useState(false);
   const [cloudOpen, setCloudOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   /**
    * Bumped whenever the dockview layout changes.
    *
@@ -312,6 +314,7 @@ export function Studio({ gate }: { gate: Gate }) {
           gate={gate}
           onOpenDatasheet={() => setDatasheetOpen(true)}
           onOpenCloudProjects={() => setCloudOpen(true)}
+          onOpenLibrary={() => setLibraryOpen(true)}
         />
         <Box sx={{ flex: 1, minHeight: 0 }}>
           <DockviewReact components={components} onReady={onReady} className="dockview-theme-abyss" />
@@ -327,6 +330,7 @@ export function Studio({ gate }: { gate: Gate }) {
       />
 
       <CloudProjectsDialog open={cloudOpen} onClose={() => setCloudOpen(false)} />
+      <LibraryDialog open={libraryOpen} onClose={() => setLibraryOpen(false)} />
     </>
   );
 }

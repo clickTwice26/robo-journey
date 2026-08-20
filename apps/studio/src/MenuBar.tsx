@@ -31,6 +31,7 @@ import FitScreenIcon from '@mui/icons-material/FitScreen';
 import BuildIcon from '@mui/icons-material/Build';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import CollectionsBookmarkIcon from '@mui/icons-material/CollectionsBookmark';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import PauseIcon from '@mui/icons-material/Pause';
@@ -48,7 +49,7 @@ import CloudDoneIcon from '@mui/icons-material/CloudDone';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import LogoutIcon from '@mui/icons-material/Logout';
-import { EXAMPLES, emptyProject } from '@robo-journey/parts';
+import { emptyProject } from '@robo-journey/parts';
 import { compileSketch, CompileUnavailableError } from './api.ts';
 import { createProject, saveProject } from './auth.ts';
 import type { AccessGate } from './useAccess.ts';
@@ -120,6 +121,7 @@ interface Props {
   actions: MenuBarActions | null;
   onOpenDatasheet(): void;
   onOpenCloudProjects(): void;
+  onOpenLibrary(): void;
   /** The seat this session is running on, for the countdown and for signing out. */
   gate: AccessGate;
 }
@@ -129,6 +131,7 @@ export function MenuBar({
   actions,
   onOpenDatasheet,
   onOpenCloudProjects,
+  onOpenLibrary,
   gate,
 }: Props) {
   const project = useStudio((s) => s.project);
@@ -237,13 +240,6 @@ export function MenuBar({
     useStudio.getState().setCompile('idle', [], null);
   }, []);
 
-  const loadExample = useCallback((id: string) => {
-    const example = EXAMPLES.find((e) => e.id === id);
-    if (!example) return;
-    useStudio.getState().loadProject(example.build());
-    useStudio.getState().setCompile('idle', [], null);
-  }, []);
-
   const unplugSelection = useCallback(() => {
     const store = useStudio.getState();
     if (!store.selection) return;
@@ -335,11 +331,12 @@ export function MenuBar({
           },
           { label: 'Save project', icon: <SaveIcon fontSize="small" />, hint: shortcut('S'), onClick: save },
           { divider: true },
-          ...EXAMPLES.map((example) => ({
-            label: `Example: ${example.name}`,
-            secondary: example.description,
-            onClick: () => loadExample(example.id),
-          })),
+          {
+            label: 'Library…',
+            icon: <CollectionsBookmarkIcon fontSize="small" />,
+            secondary: 'Prebuilt projects, grouped by what they show',
+            onClick: onOpenLibrary,
+          },
           { divider: true },
           {
             label: 'Add component from datasheet…',
@@ -477,8 +474,8 @@ export function MenuBar({
       },
     ],
     [
-      actions, build, buildAndRun, cloudProjectId, close, future.length, hex, loadExample,
-      canvasControls, newProject, onOpenCloudProjects, onOpenDatasheet, past.length, save,
+      actions, build, buildAndRun, cloudProjectId, close, future.length, hex,
+      canvasControls, newProject, onOpenCloudProjects, onOpenDatasheet, onOpenLibrary, past.length, save,
       saveToAccount, selection, signOut, sim, snapshot.running, unplugSelection, user,
     ],
   );
