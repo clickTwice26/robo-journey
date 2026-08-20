@@ -174,8 +174,10 @@ export async function listProjects(): Promise<ProjectSummary[]> {
 }
 
 export async function loadProject(id: string): Promise<{ name: string; document: unknown }> {
-  const { project } = await call<{ project: { name: string; document: string } }>(`/projects/${id}`);
-  return { name: project.name, document: JSON.parse(project.document) };
+  // The document arrives as a value, not as a string of JSON: the column is JSONB, so the server
+  // never encodes it and there is nothing here to decode.
+  const { project } = await call<{ project: { name: string; document: unknown } }>(`/projects/${id}`);
+  return { name: project.name, document: project.document };
 }
 
 export async function createProject(name: string, document: unknown): Promise<ProjectSummary> {

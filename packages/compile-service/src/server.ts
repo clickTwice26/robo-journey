@@ -94,12 +94,19 @@ export async function createServer(options: CreateServerOptions = {}): Promise<S
   // One scope for everything that reads a cookie, which is everything except the probes.
   // Registering the cookie plugin here rather than inside the auth routes is what lets the
   // compiler and the extractor check for a seat as well.
-  await app.register(async (scope) => {
-    await scope.register(cookie);
-    registerAuthRoutes(scope, { store, guards, redis });
-    registerDatasheetRoutes(scope, { guards });
-    registerCompileRoute(scope, { guards, compiler, cache });
-  });
+  //
+  // Prefixed `/api`, matching what the browser asks for in development through Vite's proxy. The
+  // two used to differ -- the proxy stripped the prefix -- which works right up until the built
+  // app is served from the same origin and every call 404s.
+  await app.register(
+    async (scope) => {
+      await scope.register(cookie);
+      registerAuthRoutes(scope, { store, guards, redis });
+      registerDatasheetRoutes(scope, { guards });
+      registerCompileRoute(scope, { guards, compiler, cache });
+    },
+    { prefix: '/api' },
+  );
 
   if (config.RJ_STATIC_DIR) registerStatic(app, config.RJ_STATIC_DIR);
 

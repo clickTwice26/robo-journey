@@ -1,0 +1,42 @@
+# Just the backing services, for developing against Vite and a locally run service.
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#   npm run service          # in one terminal
+#   npm run dev              # in another
+#
+# Ports are published here, unlike the production stack, because the whole point is to reach them
+# from processes on the host. They are still bound to loopback.
+
+name: robo-journey-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: robo
+      POSTGRES_PASSWORD: robo
+      POSTGRES_DB: robo_journey
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "127.0.0.1:28632:5432"
+    volumes:
+      - dev-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U robo -d robo_journey"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    command: redis-server --save "" --appendonly no
+    ports:
+      - "127.0.0.1:28633:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  dev-postgres:

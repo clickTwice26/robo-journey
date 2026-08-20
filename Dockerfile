@@ -71,9 +71,14 @@ RUN apt-get update \
 COPY --from=toolchain /usr/local/bin/arduino-cli /usr/local/bin/arduino-cli
 COPY --from=toolchain /opt/arduino /opt/arduino
 
+# The root filesystem is read-only, and arduino-cli wants three writable directories regardless:
+# somewhere to download to even with nothing to download, a user directory, and a build cache under
+# the XDG cache path. All three point at the tmpfs, so the container still cannot write to its own
+# application directory. The core it compiles against stays in /opt/arduino/data, which it reads.
 ENV ARDUINO_DIRECTORIES_DATA=/opt/arduino/data \
-    ARDUINO_DIRECTORIES_DOWNLOADS=/opt/arduino/downloads \
-    ARDUINO_DIRECTORIES_USER=/opt/arduino/user \
+    ARDUINO_DIRECTORIES_DOWNLOADS=/tmp/arduino/downloads \
+    ARDUINO_DIRECTORIES_USER=/tmp/arduino/user \
+    XDG_CACHE_HOME=/tmp/cache \
     NODE_ENV=production \
     RJ_COMPILER_MODE=local \
     RJ_STATIC_DIR=/app/public

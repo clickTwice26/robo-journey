@@ -1,14 +1,24 @@
-node_modules
+# What must not enter the image, and why.
+#
+# Build outputs and incremental state are the subtle ones. `tsc --build` decides what to emit from
+# `.tsbuildinfo`, so copying the host's in while excluding `dist` tells the compiler everything is
+# already built and it emits nothing at all -- a build that succeeds and produces no output.
 **/node_modules
 **/dist
+**/*.tsbuildinfo
+
+# The old SQLite database holds password hashes and session tokens. A bare `*.db` only matches the
+# repository root; these live under packages/.
+**/*.db
+**/*.db-wal
+**/*.db-shm
+
+# Secrets stay in the environment at run time, never in a layer.
+**/.env
+**/.env.*
+!**/.env.example
+
 .git
 .github
-*.db
-*.db-wal
-*.db-shm
-.env
-.env.*
-!.env.example
-apps/studio/dist
 coverage
-.DS_Store
+**/.DS_Store

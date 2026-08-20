@@ -2,7 +2,7 @@
   "name": "robo-journey",
   "version": "0.0.0",
   "private": true,
-  "description": "A hardware-accurate Arduino circuit simulator — real firmware execution on an emulated ATmega328P, coupled to a real analog circuit solver.",
+  "description": "A hardware-accurate Arduino circuit simulator \u2014 real firmware execution on an emulated ATmega328P, coupled to a real analog circuit solver.",
   "license": "MIT",
   "type": "module",
   "workspaces": [
@@ -26,8 +26,14 @@
     "bench": "vitest run --config vitest.bench.config.ts",
     "test:live": "node --env-file-if-exists=.env ./node_modules/.bin/vitest run --config vitest.live.config.ts",
     "dev": "npm run dev -w @robo-journey/studio",
-    "service": "npm run start -w @robo-journey/compile-service",
-    "settle": "node -e \"setTimeout(() => {}, 2500)\""
+    "service": "node --env-file-if-exists=.env packages/compile-service/dist/main.js",
+    "settle": "node -e \"setTimeout(() => {}, 2500)\"",
+    "stack": "docker compose up --build",
+    "stack:down": "docker compose down",
+    "stack:logs": "docker compose logs -f service",
+    "stack:dev": "docker compose -f docker-compose.dev.yml up -d",
+    "stack:dev:down": "docker compose -f docker-compose.dev.yml down",
+    "import:sqlite": "npm run build -w @robo-journey/accounts && node --env-file-if-exists=.env packages/accounts/dist/import-sqlite.js"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

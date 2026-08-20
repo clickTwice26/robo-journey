@@ -31,6 +31,14 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    build: {
+      // Served by the service from `RJ_STATIC_DIR`, at the origin root.
+      outDir: 'dist',
+      // Fail the build rather than shipping a bundle nobody meant to ship. The studio pulls in
+      // Monaco and Konva, so the default 500 kB warning fires constantly and stops being read.
+      chunkSizeWarningLimit: 2000,
+      sourcemap: true,
+    },
     resolve: {
       // Point at source rather than dist so editing the engine hot-reloads the app.
       alias: {
@@ -51,10 +59,10 @@ export default defineConfig(({ mode }) => {
       proxy: {
         // The browser cannot run avr-gcc, and must never hold the Gemini key, so everything under
         // /api goes to the local service.
-        '/api': {
-          target: `http://127.0.0.1:${servicePort}`,
-          rewrite: (path: string) => path.replace(/^\/api/, ''),
-        },
+        // No rewrite: the service serves its routes under `/api` itself, so development and the
+        // built app ask for exactly the same paths. Stripping the prefix here is what made the
+        // two differ, and the difference only shows up once the app is served for real.
+        '/api': { target: `http://127.0.0.1:${servicePort}` },
       },
     },
     worker: { format: 'es' as const },

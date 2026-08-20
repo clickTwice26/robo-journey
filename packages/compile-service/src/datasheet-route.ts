@@ -47,7 +47,7 @@ export function registerDatasheetRoutes(app: FastifyInstance, options: Datasheet
   app.post<{ Body: ExtractBody }>('/datasheet/extract', async (request, reply) => {
     // An extraction costs real money, so it is squarely one of the things the seat limit exists
     // to ration.
-    if (!options.guards.requireSeat(request, reply)) return reply;
+    if (!(await options.guards.requireSeat(request, reply))) return reply;
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {

@@ -319,6 +319,160 @@ describeWithDb('access control', () => {
     });
   });
 
+  describe('a seat has to be used', () => {
+    /**
+     * Move time forward with `idle` accounts leaving the page open but untouched, and `present`
+     * accounts working normally.
+     *
+     * Both lists matter. Anyone left out of either sends no heartbeat at all, which is a closed
+     * tab rather than an idle one -- a different rule with a different outcome, and an easy way to
+     * write a test that passes for the wrong reason.
+     */
+    const idleAway = async (ms: number, idle: string[], present: string[] = []) => {
+      const step = IDLE_MS / 4;
+      let remaining = ms;
+      while (remaining > 0) {
+        const chunk = Math.min(step, remaining);
+        clock += chunk;
+        for (const id of idle) await store.access.heartbeat(id, false);
+        for (const id of present) await store.access.heartbeat(id, true);
+        remaining -= chunk;
+      }
+    };
+
+    it('passes it on when nobody is at the keyboard', async () => {
+      const ids = (await users(CAPACITY + 1)).map((id) => id!);
+      for (const id of ids.slice(0, CAPACITY)) await store.access.request(id);
+      const waiter = ids[CAPACITY]!;
+      await store.access.request(waiter);
+
+      // Everyone with a seat leaves the tab open and walks away; the waiter is at the keyboard.
+      await idleAway(IDLE_MS + 1000, ids.slice(0, CAPACITY), [waiter]);
+
+      expect((await store.access.status(waiter)).state).toBe('active');
+    });
+
+    it('sends them to the back of the line rather than into a cooldown', async () => {
+      // They have not had their turn, so a cooldown would be punishing the wrong thing. Losing
+      // their place is the whole penalty.
+      const ids = (await users(CAPACITY + 1)).map((id) => id!);
+      for (const id of ids.slice(0, CAPACITY)) await store.access.request(id);
+      const waiter = ids[CAPACITY]!;
+      await store.access.request(waiter);
+
+      await idleAway(IDLE_MS + 1000, [ids[0]!], [...ids.slice(1, CAPACITY), waiter]);
+
+      const status = await store.access.status(ids[0]!);
+      expect(status.state).toBe('queued');
+      expect(status.lastReason).toBe('idle');
+    });
+
+    it('leaves them where they are when nobody else wants the seat', async () => {
+      // Bumping someone out of a seat that would then sit empty helps no one. They are put back in
+      // the queue and admitted again immediately, which from their side is simply not interrupted.
+      const [a] = (await users(1)).map((id) => id!);
+      await store.access.request(a!);
+      await idleAway(IDLE_MS + 1000, [a!]);
+      expect((await store.access.status(a!)).state).toBe('active');
+    });
+
+    it('still spends the hour while idling through it', async () => {
+      // Being re-admitted must not refill the clock, or leaving a tab open and untouched would be
+      // an unlimited session.
+      const [a] = (await users(1)).map((id) => id!);
+      const start = await store.access.request(a!);
+      const firstExpiry = new Date(start.expiresAt!).getTime();
+
+      await idleAway(10 * 60 * 1000, [a!]);
+      const after = await store.access.status(a!);
+      expect(after.state).toBe('active');
+      // Within a couple of minutes of the original deadline, not ten minutes past it.
+      expect(new Date(after.expiresAt!).getTime()).toBeLessThan(firstExpiry + IDLE_MS);
+    });
+
+    it('carries the rest of the hour with them', async () => {
+      // Otherwise going quiet for two minutes would be a way to start the hour over, which would
+      // make the whole limit optional.
+      const ids = (await users(CAPACITY + 1)).map((id) => id!);
+      for (const id of ids.slice(0, CAPACITY)) await store.access.request(id);
+      const waiter = ids[CAPACITY]!;
+      await store.access.request(waiter);
+
+      // Half an hour of work, then a walk away while the waiter stays at the keyboard.
+      await advance(30 * 60 * 1000, ...ids.slice(0, CAPACITY), waiter);
+      await idleAway(IDLE_MS + 1000, [ids[0]!], [...ids.slice(1, CAPACITY), waiter]);
+
+      const bumped = await store.access.status(ids[0]!);
+      expect(bumped.state).toBe('queued');
+      expect(bumped.carriedMs).toBeGreaterThan(27 * 60 * 1000);
+      expect(bumped.carriedMs).toBeLessThan(30 * 60 * 1000);
+
+      // Back at the front and admitted: the remaining half hour, not a fresh one.
+      await store.access.release(ids[1]!);
+      const back = await store.access.heartbeat(ids[0]!);
+      expect(back.state).toBe('active');
+      const left = new Date(back.expiresAt!).getTime() - clock;
+      expect(left).toBeLessThan(30 * 60 * 1000);
+      expect(left).toBeGreaterThan(27 * 60 * 1000);
+    });
+
+    it('counts a background tab as not using it', async () => {
+      // The page is alive and heartbeating, so it is not abandoned -- but nobody is looking at it,
+      // and a seat someone is not looking at is a seat someone else could have.
+      const ids = (await users(CAPACITY + 1)).map((id) => id!);
+      for (const id of ids.slice(0, CAPACITY)) await store.access.request(id);
+      const waiter = ids[CAPACITY]!;
+      await store.access.request(waiter);
+
+      await idleAway(IDLE_MS + 1000, [ids[0]!], [...ids.slice(1, CAPACITY), waiter]);
+      expect((await store.access.status(waiter)).state).toBe('active');
+      expect((await store.access.status(ids[0]!)).state).toBe('queued');
+    });
+
+    it('does not bump someone who is still working', async () => {
+      const [a] = (await users(1)).map((id) => id!);
+      await store.access.request(a!);
+      await advance(20 * 60 * 1000, a!);
+      expect((await store.access.status(a!)).state).toBe('active');
+    });
+
+    it('re-admits without instantly bumping again', async () => {
+      // The stale presence timestamp that caused the bump must not still be stale on return, or
+      // someone coming back would be thrown out on the very next pass.
+      const ids = (await users(CAPACITY + 1)).map((id) => id!);
+      for (const id of ids.slice(0, CAPACITY)) await store.access.request(id);
+      const waiter = ids[CAPACITY]!;
+      await store.access.request(waiter);
+
+      await idleAway(IDLE_MS + 1000, [ids[0]!], [...ids.slice(1, CAPACITY), waiter]);
+      expect((await store.access.status(ids[0]!)).state).toBe('queued');
+
+      await store.access.release(ids[1]!);
+      expect((await store.access.heartbeat(ids[0]!)).state).toBe('active');
+      await advance(60 * 1000, ids[0]!);
+      expect((await store.access.status(ids[0]!)).state).toBe('active');
+    });
+
+    it('still cools down when the hour runs out while idle', async () => {
+      // Idleness sends you to the back of the line; a finished hour is finished either way.
+      const [a] = (await users(1)).map((id) => id!);
+      await store.access.request(a!);
+      await advance(SESSION_MS - 60 * 1000, a!);
+      await idleAway(2 * 60 * 1000, [a!]);
+
+      expect((await store.access.status(a!)).state).toBe('cooldown');
+    });
+
+    it('treats a closed tab as leaving, not as idling', async () => {
+      // No heartbeat at all is someone who has gone, and going costs the cooldown. The grace is
+      // longer than the idle window so a page that still exists never lands here by accident.
+      const [a] = (await users(1)).map((id) => id!);
+      await store.access.request(a!);
+      await advance(GRACE_MS + 1000);
+      expect((await store.access.status(a!)).state).toBe('cooldown');
+    });
+  });
+
   it('gates the simulator on holding a seat', async () => {
     const [a] = await users(1);
     expect(await store.access.isActive(a!)).toBe(false);

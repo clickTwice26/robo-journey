@@ -220,14 +220,20 @@ export class AccountStore {
     // is not awaited on the read path -- the session is already known valid, and making every
     // request wait for a housekeeping update would be paying latency for nothing.
     if (row.expires_at.getTime() - Date.now() < SESSION_TTL_MS - SESSION_RENEW_AFTER_MS) {
-      void this.pool
-        .query('UPDATE sessions SET expires_at = $1 WHERE token_hash = $2', [
-          new Date(Date.now() + SESSION_TTL_MS),
-          hashToken(token),
-        ])
-        .catch(() => {
-          // A failed renewal costs the user nothing today; the session is still valid.
-        });
+      // Wrapped as well as caught: a query against a closed pool throws synchronously rather than
+      // returning a rejected promise, so `.catch` alone does not contain it.
+      try {
+        void this.pool
+          .query('UPDATE sessions SET expires_at = $1 WHERE token_hash = $2', [
+            new Date(Date.now() + SESSION_TTL_MS),
+            hashToken(token),
+          ])
+          .catch(() => {
+            // A failed renewal costs the user nothing today; the session is still valid.
+          });
+      } catch {
+        // Shutting down. Nothing to renew into.
+      }
     }
 
     return toUser(row);

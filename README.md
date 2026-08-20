@@ -63,30 +63,35 @@ testing cheap and makes the eventual Tauri port a packaging step rather than a r
 Requires Node 20+ and Docker.
 
 ```bash
+cp .env.example .env   # set POSTGRES_PASSWORD
+docker compose up --build
+```
+
+Then open http://localhost:28610, create an account, pick **Examples → Blink an LED**, and press
+**Build & Run**. The service serves the studio and the API from one origin, so there is no proxy to
+configure. See [DEPLOYMENT.md](DEPLOYMENT.md) for what runs where and why.
+
+For day-to-day work, run only the backing services and keep Vite's feedback loop:
+
+```bash
 npm install
-npm run image:build   # builds the pinned arduino-cli image (~2 min, once)
-npm run verify        # typecheck, test suite, benchmarks
+docker compose -f docker-compose.dev.yml up -d   # postgres + redis
+npm run service                                  # in one terminal
+npm run dev                                      # in another
 ```
 
-To run the app, start the compile service and the dev server:
+That puts the app on http://localhost:28611. The ports sit well away from the crowded defaults so
+this can run beside other projects; the dev server uses `strictPort`, so a collision fails loudly
+rather than silently moving somewhere the API proxy is not looking.
 
 ```bash
-npm run service
+npm run verify        # typecheck, 574 tests, benchmarks
 ```
 
-```bash
-npm run dev
-```
-
-Then open http://localhost:28611, pick **Examples → Blink an LED**, and press **Build & Run**.
-
-The ports (28610 for the service, 28611 for the app) sit well away from the crowded defaults so
-this can run beside other projects. Override `RJ_SERVICE_PORT` and `RJ_STUDIO_PORT` in `.env` if
-that range is taken, and update `.claude/launch.json` to match. The dev server uses `strictPort`,
-so a collision fails loudly rather than silently moving somewhere the API proxy is not looking.
-
-`npm run verify` is the gate: it typechecks every package and runs 32 tests, including a full-spine
-integration test that compiles Blink through Docker and asserts the emulated D13 toggles at 1 Hz.
+`npm run verify` is the gate. It typechecks every package and the app, then runs the suite —
+including a full-spine test that compiles Blink through Docker and asserts the emulated D13 toggles
+at 1 Hz, and the account and queue suites against a real Postgres and Redis brought up for the run
+and taken away afterwards. Without Docker those suites skip with a notice rather than failing.
 
 Tests that need Docker skip themselves when the image is absent, so a checkout without Docker still
 runs green against the committed firmware fixture.
@@ -195,12 +200,21 @@ the default document and overwrite the real one. A stored project that no longer
 discarded rather than repaired: silently loading half a document is worse than starting fresh,
 because you would not know which half.
 
-**Accounts**, for syncing across machines. SQLite through `node:sqlite` — ships with Node, no
-native build step, and the whole database is one file you can back up or delete. Passwords are
-hashed with scrypt at N=2^15 (~55 ms), salted per user, with the cost parameters stored alongside
-so they can be raised later without forcing a password reset. Session tokens are 32 random bytes
-stored only as a SHA-256 hash, so a leaked database does not hand over live sessions. Cookies are
-`httpOnly` and `SameSite=Strict`.
+**Accounts**, for syncing across machines, in Postgres. Passwords are hashed with scrypt at
+N=2^15 (~55 ms), salted per user, with the cost parameters stored alongside so they can be raised
+later without forcing a password reset. Session tokens are 32 random bytes stored only as a
+SHA-256 hash, so a leaked database does not hand over live sessions. Cookies are `httpOnly` and
+`SameSite=Strict`.
+
+**A queue**, because an account alone does not make the simulator usable — ten people can use it at
+once, for an hour each, and everyone else waits in line and is let in automatically. That limit is
+the reason the store is Postgres rather than a file: two service instances each seeing nine seats
+taken would each admit someone into the tenth. Every reconcile pass runs in a transaction holding
+an advisory lock, so "ten" means ten no matter how many processes are serving.
+
+**Redis**, for the two things better off ephemeral: rate-limit counters, which were per-process and
+therefore not a limit at all once there was more than one process, and the compile cache, which is
+content-addressed and worth sharing across instances.
 
 A wrong password and a missing account return the same message, and a missing account still pays
 the cost of a hash — so neither the response nor its timing reveals which addresses are registered.

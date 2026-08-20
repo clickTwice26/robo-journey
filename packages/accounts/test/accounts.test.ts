@@ -106,26 +106,26 @@ describeWithDb('registration', () => {
   it('treats addresses case-insensitively', async () => {
     const db = store();
     await db.register('ada@example.com', GOOD_PASSWORD, 'Ada');
-    await expect(await db.register('ADA@EXAMPLE.COM', GOOD_PASSWORD, 'Ada')).rejects.toThrow(EmailInUseError);
+    await expect(db.register('ADA@EXAMPLE.COM', GOOD_PASSWORD, 'Ada')).rejects.toThrow(EmailInUseError);
     expect(normaliseEmail('  Ada@Example.COM ')).toBe('ada@example.com');
   });
 
   it('refuses a second account on the same address', async () => {
     const db = store();
     await db.register('ada@example.com', GOOD_PASSWORD, 'Ada');
-    await expect(await db.register('ada@example.com', GOOD_PASSWORD, 'Other')).rejects.toThrow(EmailInUseError);
+    await expect(db.register('ada@example.com', GOOD_PASSWORD, 'Other')).rejects.toThrow(EmailInUseError);
   });
 
   it('refuses an implausible address', async () => {
     const db = store();
-    await expect(await db.register('not-an-email', GOOD_PASSWORD, 'X')).rejects.toThrow(/email address/);
+    await expect(db.register('not-an-email', GOOD_PASSWORD, 'X')).rejects.toThrow(/email address/);
   });
 
   it('refuses a weak password before creating anything', async () => {
     const db = store();
-    await expect(await db.register('ada@example.com', 'short', 'Ada')).rejects.toThrow(WeakPasswordError);
+    await expect(db.register('ada@example.com', 'short', 'Ada')).rejects.toThrow(WeakPasswordError);
     // And leaves no account behind.
-    await expect(await db.authenticate('ada@example.com', 'short')).rejects.toThrow(InvalidCredentialsError);
+    await expect(db.authenticate('ada@example.com', 'short')).rejects.toThrow(InvalidCredentialsError);
   });
 
   it('falls back to the address for a blank display name', async () => {
@@ -218,10 +218,9 @@ describeWithDb('sessions', () => {
   it('expires', async () => {
     const { db, user } = await signedIn();
     const session = await db.createSession(user.id);
-    // Reach into the database to age it, rather than waiting thirty days.
-    const past = new Date(Date.now() - 1000).toISOString();
-    // @ts-expect-error -- reaching into the private handle deliberately, for this test only.
-    db.db.prepare('UPDATE sessions SET expires_at = ?').run(past);
+    // Age it directly rather than waiting thirty days. The pool is the seam now, so this needs
+    // no reaching into anything private.
+    await backends.pool.query('UPDATE sessions SET expires_at = now() - interval \'1 second\'');
 
     expect(await db.resolveSession(session.token)).toBeNull();
   });
@@ -229,8 +228,7 @@ describeWithDb('sessions', () => {
   it('prunes expired sessions', async () => {
     const { db, user } = await signedIn();
     await db.createSession(user.id);
-    // @ts-expect-error -- see above.
-    db.db.prepare('UPDATE sessions SET expires_at = ?').run(new Date(Date.now() - 1000).toISOString());
+    await backends.pool.query('UPDATE sessions SET expires_at = now() - interval \'1 second\'');
     expect(await db.pruneSessions()).toBeGreaterThan(0);
   });
 });
@@ -295,8 +293,7 @@ describeWithDb('projects', () => {
   it('deletes a users projects along with the account', async () => {
     const { db, ada } = await twoUsers();
     await db.createProject(ada.id, 'Doomed', {});
-    // @ts-expect-error -- reaching into the private handle deliberately.
-    db.db.prepare('DELETE FROM users WHERE id = ?').run(ada.id);
+    await backends.pool.query('DELETE FROM users WHERE id = $1', [ada.id]);
     // The foreign key cascade must actually be on, or orphaned rows accumulate forever.
     expect(await db.listProjects(ada.id)).toEqual([]);
   });
