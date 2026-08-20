@@ -188,21 +188,24 @@ export function Studio({ gate }: { gate: Gate }) {
 
     // Tabbed with the editor rather than in the bottom strip: a conversation needs height, and the
     // bottom row is where short readouts live.
-    // Properties under the code rather than under the parts list: you select something on the
-    // canvas and look right, which is the same direction you already look for the sketch.
-    api.addPanel({
-      id: 'properties',
-      component: 'properties',
-      title: 'Properties',
-      position: { direction: 'below', referencePanel: editor },
-    });
-
     api.addPanel({
       id: 'assistant',
       component: 'assistant',
       title: 'Assistant',
       position: { referencePanel: editor, direction: 'within' },
     });
+
+    // Properties joins the same group rather than taking a slice of height from it. Selecting a
+    // part is a moment, not a mode: you click something, read it, adjust it and go back to the
+    // code, and a permanent panel would spend most of its life empty while making the editor
+    // shorter. Clicking a part on the canvas brings this tab forward -- see the effect below.
+    api.addPanel({
+      id: 'properties',
+      component: 'properties',
+      title: 'Properties',
+      position: { referencePanel: editor, direction: 'within' },
+    });
+
     editor.api.setActive();
 
     const problems = api.addPanel({
@@ -223,6 +226,28 @@ export function Studio({ gate }: { gate: Gate }) {
     }
 
     problems.api.setActive();
+  }, []);
+
+  /**
+   * Clicking a part on the canvas brings its properties forward.
+   *
+   * Subscribed to the store directly rather than through a hook: this has to react to a selection
+   * without making the whole shell re-render every time one changes, and the shell is the most
+   * expensive thing on the page to re-render.
+   *
+   * Only ever activates a panel that is already open. Re-opening one somebody deliberately closed,
+   * on every single click, would be the app arguing with them.
+   */
+  useEffect(() => {
+    let previous = useStudio.getState().selection;
+
+    return useStudio.subscribe((state) => {
+      const selection = state.selection;
+      if (selection === previous) return;
+      previous = selection;
+      if (selection === null) return;
+      apiRef.current?.getPanel('properties')?.api.setActive();
+    });
   }, []);
 
   const onReady = useCallback(
