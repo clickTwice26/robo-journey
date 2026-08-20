@@ -78,6 +78,14 @@ export interface PartDefinition {
   readonly type: string;
   readonly label: string;
   readonly category: PartCategory;
+  /**
+   * Where the part came from, when it came from a manifest.
+   *
+   * The UI marks generated components so an extraction nobody has checked is visibly different
+   * from a part that ships with the app. Being registered at run time is not the same thing --
+   * the built-in manifests are registered too -- so the distinction has to be carried explicitly.
+   */
+  readonly provenance?: 'builtin' | 'datasheet-ai' | 'hand-written' | 'imported';
   /** Bounding size in millimetres, for canvas layout and hit testing. */
   readonly width: number;
   readonly height: number;

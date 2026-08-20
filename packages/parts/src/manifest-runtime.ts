@@ -446,6 +446,7 @@ export function manifestToPartDefinition(
     type: manifest.id,
     label: manifest.name,
     category: mapCategory(manifest.category),
+    provenance: manifest.provenance.source,
     width: layout.width,
     height: layout.height,
     pins,
@@ -753,6 +754,11 @@ function mapCategory(category: ComponentManifest['category']): PartDefinition['c
       return 'passive';
     case 'power':
       return 'power';
+    // A "module" is a breakout you talk to -- a clock, an expander, a radio. The palette has five
+    // buckets and none of them is "module", so it goes where the thing is read rather than where
+    // it is written, which is how one gets used.
+    case 'module':
+      return 'input';
     default:
       return 'output';
   }

@@ -8,7 +8,12 @@
  * and invisible to every test, because nothing tested it.
  */
 import { describe, expect, it } from 'vitest';
-import type { PartDefinition, PartPin } from '@robo-journey/parts';
+import {
+  BUILTIN_MANIFESTS,
+  manifestToPartDefinition,
+  type PartDefinition,
+  type PartPin,
+} from '@robo-journey/parts';
 import { bandHeightOf, bodyLayout, fitText } from '../src/canvas/part-layout.ts';
 
 const pin = (name: string, x: number, y: number): PartPin => ({ name, x, y });
@@ -133,5 +138,42 @@ describe('fitting text to a body', () => {
 
   it('stops shrinking before it becomes unreadable', () => {
     expect(fitText('a-very-long-part-number-indeed', 10, 9)).toBeGreaterThanOrEqual(3.5);
+  });
+});
+
+/**
+ * The whole library, through the same layout the canvas uses.
+ *
+ * The generic layout was written against two shapes -- a header module and a DIP -- and the
+ * library now has forty-five parts in a dozen. A component whose name lands on top of its own pin
+ * labels is not a crash and not a test failure anywhere else; it is simply ugly, and it stays ugly
+ * until someone happens to place that part. This is the sweep that notices first.
+ */
+describe('every built-in part', () => {
+  const parts = BUILTIN_MANIFESTS.map((m) => manifestToPartDefinition(m));
+
+  it.each(parts.map((p) => [p.type, p] as const))('%s keeps its name inside the body', (_type, definition) => {
+    const layout = bodyLayout(definition, TITLE_MM);
+    if (!layout.titleBand) return;
+    expect(layout.titleBand.top).toBeGreaterThanOrEqual(0);
+    expect(layout.titleBand.bottom).toBeLessThanOrEqual(definition.height);
+    expect(bandHeightOf(layout.titleBand)).toBeGreaterThan(0);
+  });
+
+  it.each(parts.map((p) => [p.type, p] as const))('%s keeps its name off its pins', (_type, definition) => {
+    const layout = bodyLayout(definition, TITLE_MM);
+    if (!layout.titleBand) return;
+    // A pin row inside the title band means the name is drawn straight through the labels.
+    for (const pin of definition.pins) {
+      const inside = pin.y > layout.titleBand.top && pin.y < layout.titleBand.bottom;
+      expect(inside).toBe(false);
+    }
+  });
+
+  it('finds room for the name on all but the smallest packages', () => {
+    // Not every part can carry a name -- a 7 mm radial capacitor genuinely has nowhere to put one
+    // -- but most should, and a sudden drop here would mean the layout regressed.
+    const named = parts.filter((p) => bodyLayout(p, TITLE_MM).titleBand !== null);
+    expect(named.length).toBeGreaterThan(parts.length * 0.75);
   });
 });
