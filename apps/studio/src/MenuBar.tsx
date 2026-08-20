@@ -61,6 +61,7 @@ import type { SimulationController } from './sim/useSimulation.ts';
 export const PANELS = [
   { id: 'workspace', title: 'Workspace' },
   { id: 'palette', title: 'Parts' },
+  { id: 'properties', title: 'Properties' },
   { id: 'editor', title: 'sketch.ino' },
   { id: 'problems', title: 'Problems' },
   { id: 'serial', title: 'Serial Monitor' },

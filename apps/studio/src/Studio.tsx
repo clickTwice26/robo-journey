@@ -28,6 +28,7 @@ import { EditorPanel } from './panels/Editor.tsx';
 import { SerialPanel } from './panels/Serial.tsx';
 import { ProblemsPanel } from './panels/Problems.tsx';
 import { PalettePanel } from './panels/Palette.tsx';
+import { PropertiesPanel } from './panels/Properties.tsx';
 import { ScopePanel } from './panels/Scope.tsx';
 import { InspectorPanel } from './panels/Inspector.tsx';
 import { DisassemblyPanel } from './panels/Disassembly.tsx';
@@ -142,6 +143,7 @@ export function Studio({ gate }: { gate: Gate }) {
       serial: (_props: IDockviewPanelProps) => <SerialPanel />,
       problems: (_props: IDockviewPanelProps) => <ProblemsPanel />,
       palette: (_props: IDockviewPanelProps) => <PalettePanel sim={sim} />,
+      properties: (_props: IDockviewPanelProps) => <PropertiesPanel />,
       scope: (_props: IDockviewPanelProps) => <ScopePanel sim={sim} />,
       inspector: (_props: IDockviewPanelProps) => <InspectorPanel sim={sim} />,
       disassembly: (_props: IDockviewPanelProps) => <DisassemblyPanel sim={sim} />,
@@ -186,6 +188,15 @@ export function Studio({ gate }: { gate: Gate }) {
 
     // Tabbed with the editor rather than in the bottom strip: a conversation needs height, and the
     // bottom row is where short readouts live.
+    // Properties under the code rather than under the parts list: you select something on the
+    // canvas and look right, which is the same direction you already look for the sketch.
+    api.addPanel({
+      id: 'properties',
+      component: 'properties',
+      title: 'Properties',
+      position: { direction: 'below', referencePanel: editor },
+    });
+
     api.addPanel({
       id: 'assistant',
       component: 'assistant',

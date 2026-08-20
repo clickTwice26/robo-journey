@@ -11,11 +11,20 @@
  */
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
 import { Circle, Group, Line, Path, Rect, Text } from 'react-konva';
-import type { PartInstance } from '@robo-journey/parts';
+import { partDefinition, type PartInstance } from '@robo-journey/parts';
 import { canvas } from '../theme.ts';
 
 const PX_PER_MM = 5;
 const mm = (value: number): number => value * PX_PER_MM;
+
+/** A stimulus type's declared reach, for drawing the ring before anyone has changed it. */
+function defaultReach(type: string): number {
+  try {
+    return Number(partDefinition(type).defaults.reachMm ?? 30);
+  } catch {
+    return 30;
+  }
+}
 
 /**
  * A slow clock for things that visibly move.
@@ -53,7 +62,10 @@ interface StimulusProps {
 
 /** The half-strength ring, drawn only for the selection so the canvas is not full of circles. */
 function Reach({ part, selected, color }: StimulusProps & { color: string }) {
-  const reach = Number(part.props.reachMm ?? 30);
+  // The definition's own default, not a generic one: a sound source reaches 50 mm and a magnet 15,
+  // and drawing 30 for both until someone touches the slider would make the ring a lie.
+  const fallback = defaultReach(part.type);
+  const reach = Number(part.props.reachMm ?? fallback);
   if (!selected || !(reach > 0)) return null;
 
   const definitionSize = mm(14);
