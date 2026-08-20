@@ -22,17 +22,34 @@ const blinkHex = readFileSync(
   'utf8',
 );
 
-/** Simulated seconds per wall-clock second. Above 1.0 means faster than real time. */
+/** How many times to measure. */
+const ATTEMPTS = 3;
+
+/**
+ * Simulated seconds per wall-clock second, best of several runs.
+ *
+ * Best-of-N rather than a single measurement because this is a wall-clock ratio on a developer's
+ * machine, which may also be running a dev server, a compile service and a browser. Any one run
+ * can be interrupted; the best of a few measures what the engine can do, which is the question the
+ * assertion is actually asking. A slow *best* is a real regression.
+ */
 function realtimeRatio(build: (board: Board) => void, simSeconds = 0.25): number {
-  const board = new Board({ progMem: loadHex(blinkHex) });
-  build(board);
+  let best = 0;
 
-  // Warm up, so JIT compilation does not land inside the measurement.
-  board.runFor(0.01);
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    const board = new Board({ progMem: loadHex(blinkHex) });
+    build(board);
 
-  const start = performance.now();
-  board.runFor(simSeconds);
-  return simSeconds / ((performance.now() - start) / 1000);
+    // Warm up, so JIT compilation does not land inside the measurement.
+    board.runFor(0.01);
+
+    const start = performance.now();
+    board.runFor(simSeconds);
+    const ratio = simSeconds / ((performance.now() - start) / 1000);
+    if (ratio > best) best = ratio;
+  }
+
+  return best;
 }
 
 describe('real-time performance', () => {

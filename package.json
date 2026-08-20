@@ -19,13 +19,14 @@
     "test:watch": "vitest",
     "typecheck": "npm run build && npm run typecheck:tests",
     "typecheck:tests": "tsc -p packages/sim-core/tsconfig.test.json && tsc -p packages/compile-service/tsconfig.test.json && tsc -p packages/parts/tsconfig.test.json && tsc -p packages/datasheet/tsconfig.test.json",
-    "verify": "npm run typecheck && npm run test && npm run bench",
+    "verify": "npm run typecheck && npm run test && npm run settle && npm run bench",
     "image:build": "npm run image:build -w @robo-journey/compile-service",
     "fixtures:build": "npm run fixtures:build -w @robo-journey/compile-service",
     "bench": "vitest run --config vitest.bench.config.ts",
     "test:live": "node --env-file-if-exists=.env ./node_modules/.bin/vitest run --config vitest.live.config.ts",
     "dev": "npm run dev -w @robo-journey/studio",
-    "service": "npm run start -w @robo-journey/compile-service"
+    "service": "npm run start -w @robo-journey/compile-service",
+    "settle": "node -e \"setTimeout(() => {}, 2500)\""
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { Board, I2cBus, RegisterFilePeripheral, Resistor, loadHex } from '../src/index.js';
-import type { I2cPeripheral, TwiHost } from '../src/bus/i2c.js';
+import type { I2cPeripheral, RegisterSpec, TwiHost } from '../src/bus/i2c.js';
 
 const i2cHex = readFileSync(
   fileURLToPath(new URL('./fixtures/i2c.hex', import.meta.url)),
@@ -42,11 +42,12 @@ function fakeTwi() {
   return host;
 }
 
-const spec = (address: number, name: string, over: Partial<Parameters<typeof RegisterFilePeripheral>[1][number]> = {}) => ({
+/** A register with sensible defaults, so each case states only what it is testing. */
+const spec = (address: number, name: string, over: Partial<RegisterSpec> = {}): RegisterSpec => ({
   address,
   name,
   reset: 0,
-  access: 'rw' as const,
+  access: 'rw',
   scale: 1,
   offset: 0,
   bytes: 1,
