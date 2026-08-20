@@ -277,6 +277,27 @@ export const BehaviorSchema = z.discriminatedUnion('kind', [
   }),
 
   /**
+   * A bipolar junction transistor.
+   *
+   * Discrete semiconductors do not fit any of the sensor archetypes: they have no state variable
+   * and no protocol, they simply amplify. Simulated by a real Ebers-Moll model, so a transistor
+   * extracted from a datasheet switches, saturates and drops its ~0.7 V like the part it came from.
+   */
+  z.object({
+    kind: z.literal('transistor'),
+    polarity: z.enum(['npn', 'pnp']),
+    collectorPin: z.string(),
+    basePin: z.string(),
+    emitterPin: z.string(),
+    /** Forward current gain, the datasheet's hFE. Use the typical figure, not the minimum. */
+    forwardBeta: z.number().positive().default(200),
+    /** Reverse gain. Rarely quoted; it is what makes saturation saturate. */
+    reverseBeta: z.number().positive().default(4),
+    /** Transport saturation current, amps. Around 1e-14 for a small-signal device. */
+    saturationCurrent: z.number().positive().default(1e-14),
+  }),
+
+  /**
    * A digital output whose level follows a threshold on a state variable.
    *
    * Covers comparator modules, PIR sensors, reed switches, limit switches and tilt sensors.

@@ -6,7 +6,7 @@
  * recompute both from the previous timestep's state. That uniformity is why the solver core does
  * not need to know what any of these are.
  */
-import { GROUND, type MnaSystem } from './mna.js';
+import { GMIN, GROUND, type MnaSystem } from './mna.js';
 import { VT } from './constants.js';
 
 /** What a device sees while stamping itself into the system. */
@@ -603,4 +603,226 @@ export class Inductor implements Device {
   private usesTrapezoidal(ctx: StampContext): boolean {
     return this.method === 'trapezoidal' && this.started && !ctx.forceBackwardEuler;
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Transistors
+// ---------------------------------------------------------------------------------------------
+
+export type BjtPolarity = 'npn' | 'pnp';
+
+export interface BjtModel {
+  /** Transport saturation current, amps. */
+  readonly saturationCurrent: number;
+  /** Forward current gain, the datasheet's hFE. */
+  readonly forwardBeta: number;
+  /** Reverse current gain. Small, and rarely quoted, but it is what makes saturation saturate. */
+  readonly reverseBeta: number;
+  /** Forward emission coefficient. */
+  readonly forwardEmission: number;
+  /** Reverse emission coefficient. */
+  readonly reverseEmission: number;
+}
+
+/** BC547B, the general-purpose NPN in every parts drawer. hFE 200-450, typical 290. */
+export const BJT_BC547: BjtModel = {
+  saturationCurrent: 1.8e-14,
+  forwardBeta: 290,
+  reverseBeta: 4,
+  forwardEmission: 1,
+  reverseEmission: 1,
+};
+
+/** 2N3904, the American equivalent. */
+export const BJT_2N3904: BjtModel = {
+  saturationCurrent: 6.7e-15,
+  forwardBeta: 200,
+  reverseBeta: 4,
+  forwardEmission: 1,
+  reverseEmission: 1,
+};
+
+/**
+ * Bipolar junction transistor, Ebers-Moll in transport form.
+ *
+ * The first device here that amplifies, which is why the MNA layer needed a transconductance stamp
+ * before it could exist: every element until now coupled a pair of nodes to itself, and a
+ * transistor couples the base-emitter voltage to the collector current.
+ *
+ * Both junctions get `pnjlim` damping, for the same reason the diode does and more so -- a
+ * transistor has two exponentials, and an undamped first guess of 5 V on either one diverges
+ * immediately.
+ *
+ * PNP is handled by flipping the sign of every junction voltage and every terminal current, which
+ * is exactly what the physics does: the same equations with holes instead of electrons.
+ */
+export class Bjt implements Device {
+  readonly branchCount = 0;
+  readonly internalNodeCount = 0;
+  readonly nonlinear = true;
+  branchOffset = 0;
+  internalNodeOffset = -1;
+  readonly nodes: readonly number[];
+
+  /** Last accepted junction voltages, the anchors for limiting. */
+  private vbePrev = 0;
+  private vbcPrev = 0;
+  private readonly vCriticalF: number;
+  private readonly vCriticalR: number;
+
+  private lastIc = 0;
+  private lastIb = 0;
+  private lastVbe = 0;
+  private lastVce = 0;
+
+  constructor(
+    readonly id: string,
+    private readonly collector: number,
+    private readonly base: number,
+    private readonly emitter: number,
+    readonly polarity: BjtPolarity = 'npn',
+    readonly model: BjtModel = BJT_BC547,
+  ) {
+    this.nodes = [collector, base, emitter];
+    const nvtF = model.forwardEmission * VT;
+    const nvtR = model.reverseEmission * VT;
+    this.vCriticalF = nvtF * Math.log(nvtF / (Math.SQRT2 * model.saturationCurrent));
+    this.vCriticalR = nvtR * Math.log(nvtR / (Math.SQRT2 * model.saturationCurrent));
+  }
+
+  reset(): void {
+    this.vbePrev = 0;
+    this.vbcPrev = 0;
+    this.lastIc = 0;
+    this.lastIb = 0;
+    this.lastVbe = 0;
+    this.lastVce = 0;
+  }
+
+  /** Collector current at the last converged operating point, amps. Positive into the collector. */
+  get collectorCurrent(): number {
+    return this.lastIc;
+  }
+
+  get baseCurrent(): number {
+    return this.lastIb;
+  }
+
+  /** Base-emitter voltage. ~0.7 V when conducting, which is the number everyone checks first. */
+  get vbe(): number {
+    return this.lastVbe;
+  }
+
+  get vce(): number {
+    return this.lastVce;
+  }
+
+  /**
+   * Operating region, as a datasheet names it.
+   *
+   * Worth reporting because it is the question people actually have: a transistor meant to be a
+   * switch that turns out to be sitting in the active region is the bug, and the numbers alone do
+   * not say so.
+   */
+  get region(): 'cutoff' | 'active' | 'saturation' | 'reverse' {
+    const on = (v: number) => v > 0.4;
+    const beOn = on(this.polarity === 'npn' ? this.lastVbe : -this.lastVbe);
+    const bcOn = on(
+      this.polarity === 'npn'
+        ? this.lastVbe - this.lastVce
+        : -(this.lastVbe - this.lastVce),
+    );
+    if (!beOn && !bcOn) return 'cutoff';
+    if (beOn && !bcOn) return 'active';
+    if (beOn && bcOn) return 'saturation';
+    return 'reverse';
+  }
+
+  stamp(ctx: StampContext): void {
+    const {
+      saturationCurrent: is,
+      forwardBeta: bf,
+      reverseBeta: br,
+      forwardEmission: nf,
+      reverseEmission: nr,
+    } = this.model;
+
+    const nvtF = nf * VT;
+    const nvtR = nr * VT;
+    // PNP is the same device with every voltage inverted.
+    const sign = this.polarity === 'npn' ? 1 : -1;
+
+    let vbe = sign * (ctx.voltage(this.base) - ctx.voltage(this.emitter));
+    let vbc = sign * (ctx.voltage(this.base) - ctx.voltage(this.collector));
+
+    if (ctx.firstIteration && this.vbePrev === 0 && this.vbcPrev === 0) {
+      // Cold start below the knee on both junctions, or the first Geq is an open circuit and the
+      // solver spends many iterations finding the device at all.
+      vbe = Math.min(vbe, this.vCriticalF);
+      vbc = Math.min(vbc, this.vCriticalR);
+    }
+
+    const limitedBe = limitJunction(vbe, this.vbePrev, nvtF, this.vCriticalF);
+    const limitedBc = limitJunction(vbc, this.vbcPrev, nvtR, this.vCriticalR);
+    if (limitedBe !== vbe || limitedBc !== vbc) ctx.requestIteration();
+    vbe = limitedBe;
+    vbc = limitedBc;
+    this.vbePrev = vbe;
+    this.vbcPrev = vbc;
+
+    // Exponentials, floored in deep reverse bias where they underflow to nothing.
+    const expBe = vbe >= -5 * nvtF ? Math.exp(vbe / nvtF) : 0;
+    const expBc = vbc >= -5 * nvtR ? Math.exp(vbc / nvtR) : 0;
+
+    // Transport current, and the two base recombination currents.
+    const ict = is * (expBe - expBc);
+    const ibe = (is / bf) * (expBe - 1);
+    const ibc = (is / br) * (expBc - 1);
+
+    // Small-signal conductances. Floored at gmin so a cut-off device still ties its nodes into
+    // the matrix rather than floating them.
+    const gf = Math.max((is / nvtF) * expBe, GMIN);
+    const gr = Math.max((is / nvtR) * expBc, GMIN);
+    const gpi = Math.max(gf / bf, GMIN);
+    const gmu = Math.max(gr / br, GMIN);
+
+    const b = this.base;
+    const c = this.collector;
+    const e = this.emitter;
+
+    // Base-emitter and base-collector junctions, as conductances with their linearisation offsets.
+    ctx.mna.stampConductance(b, e, gpi);
+    ctx.mna.stampCurrentSource(b, e, sign * (ibe - gpi * vbe));
+
+    ctx.mna.stampConductance(b, c, gmu);
+    ctx.mna.stampCurrentSource(b, c, sign * (ibc - gmu * vbc));
+
+    // Transport: the forward term is what makes it an amplifier, the reverse term is what makes
+    // saturation behave.
+    ctx.mna.stampVCCS(c, e, b, e, gf);
+    ctx.mna.stampVCCS(e, c, b, c, gr);
+    ctx.mna.stampCurrentSource(c, e, sign * (ict - gf * vbe + gr * vbc));
+
+    this.lastVbe = sign * vbe;
+    this.lastVce = sign * (vbe - vbc);
+    this.lastIc = sign * (ict - ibc);
+    this.lastIb = sign * (ibe + ibc);
+  }
+}
+
+/**
+ * SPICE's `pnjlim`, shared by every device with a PN junction.
+ *
+ * Extracted from the diode once the transistor needed it twice over: a BJT has two junctions, and
+ * an undamped first guess on either diverges on the first iteration.
+ */
+function limitJunction(vNew: number, vOld: number, nvt: number, vCritical: number): number {
+  if (vNew > vCritical && Math.abs(vNew - vOld) > 2 * nvt) {
+    if (vOld > 0) {
+      const arg = 1 + (vNew - vOld) / nvt;
+      return arg > 0 ? vOld + nvt * Math.log(arg) : vCritical;
+    }
+    return nvt * Math.log(vNew / nvt);
+  }
+  return vNew;
 }

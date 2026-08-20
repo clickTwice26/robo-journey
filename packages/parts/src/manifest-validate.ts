@@ -142,7 +142,9 @@ export function validateManifest(manifest: ComponentManifest): ValidationResult 
 
   const hasPower = manifest.pins.some((p) => p.model.kind === 'power');
   const hasGround = manifest.pins.some((p) => p.model.kind === 'ground');
-  const isActive = manifest.behavior.kind !== 'passive' && manifest.behavior.kind !== 'variable-resistor';
+  // Transistors and passives are three-terminal or two-terminal devices wired into someone else's
+  // circuit; they have no supply pin of their own and demanding one would reject every one of them.
+  const isActive = !['passive', 'variable-resistor', 'transistor'].includes(manifest.behavior.kind);
 
   if (isActive && !hasPower) {
     error('pins', 'An active component has no power pin, so it can never be energised.');
@@ -236,6 +238,27 @@ export function validateManifest(manifest: ComponentManifest): ValidationResult 
       }
       if (behavior.holdCurrentA > behavior.movingCurrentA) {
         warn('behavior.holdCurrentA', 'Holding current exceeds moving current, which is unusual.');
+      }
+      break;
+    }
+
+    case 'transistor': {
+      for (const key of ['collectorPin', 'basePin', 'emitterPin'] as const) {
+        requirePin(`behavior.${key}`, behavior[key], 'Transistor');
+      }
+      const terminals = new Set([behavior.collectorPin, behavior.basePin, behavior.emitterPin]);
+      if (terminals.size !== 3) {
+        error('behavior', 'Collector, base and emitter must be three different pins.');
+      }
+      if (behavior.forwardBeta < 1) {
+        error('behavior.forwardBeta', `hFE of ${behavior.forwardBeta} would attenuate, not amplify.`);
+      }
+      if (behavior.forwardBeta > 100_000) {
+        warn('behavior.forwardBeta', `hFE of ${behavior.forwardBeta} is implausible outside a Darlington.`);
+      }
+      if (behavior.saturationCurrent > 1e-6) {
+        // A transport Is that large makes the device conduct at almost no bias at all.
+        error('behavior.saturationCurrent', `${behavior.saturationCurrent} A is far too large; small-signal parts are around 1e-14.`);
       }
       break;
     }

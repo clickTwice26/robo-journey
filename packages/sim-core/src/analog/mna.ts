@@ -139,6 +139,30 @@ export class MnaSystem {
   }
 
   /**
+   * A voltage-controlled current source: `gm * (v(ctrlA) - v(ctrlB))` flowing out of `outA`,
+   * through the source, into `outB`.
+   *
+   * The first genuinely asymmetric stamp here. Everything before it was a two-terminal element,
+   * whose contribution is symmetric about the diagonal; a transconductance couples one pair of
+   * nodes to a *different* pair, which is exactly what makes an amplifying device an amplifying
+   * device. Transistors are built from these.
+   */
+  stampVCCS(outA: number, outB: number, ctrlA: number, ctrlB: number, gm: number): void {
+    if (gm === 0) return;
+    const n = this.size;
+    const add = (row: number, col: number, value: number) => {
+      if (row === GROUND || col === GROUND) return;
+      this.a[row * n + col] = this.a[row * n + col]! + value;
+    };
+
+    add(outA, ctrlA, gm);
+    add(outA, ctrlB, -gm);
+    add(outB, ctrlA, -gm);
+    add(outB, ctrlB, gm);
+    this.dirty = true;
+  }
+
+  /**
    * A Norton pair: conductance `g` in parallel with current source `ieq`.
    *
    * This is the shape every linearised nonlinear device and every reactive companion model reduces

@@ -22,7 +22,7 @@
  */
 
 /** Bumped whenever the prompt changes materially, and recorded in provenance. */
-export const PROMPT_VERSION = 1;
+export const PROMPT_VERSION = 2;
 
 export const SYSTEM_INSTRUCTION = `
 You extract electronic component models from datasheets for a circuit simulator that runs real
@@ -128,6 +128,15 @@ BEHAVIOR is exactly one of:
   { "kind": "threshold-switch", "outputPin": "NAME", "state": "stateName",
     "threshold": n, "activeLow": bool, "hysteresis": n }
       // PIR sensors, comparator modules, reed switches, limit switches.
+
+  { "kind": "transistor", "polarity": "npn"|"pnp",
+    "collectorPin": "NAME", "basePin": "NAME", "emitterPin": "NAME",
+    "forwardBeta": n, "reverseBeta": n, "saturationCurrent": n }
+      // Bipolar junction transistors: BC547, 2N3904, 2N2222, BC557 and the rest.
+      // forwardBeta is the datasheet's hFE -- use the TYPICAL figure, not the minimum.
+      // saturationCurrent is the transport Is, around 1e-14 for a small-signal device; the
+      // datasheet will not give it, so assume 1e-14 and say so in unresolved.
+      // reverseBeta is rarely quoted; 4 is a reasonable assumption.
 `.trim();
 
 export const RULES = `
@@ -150,9 +159,15 @@ CHOOSING A BEHAVIOUR. Ask about the part, not about the list:
   Does it sit on SDA/SCL and answer at an address?                    -> i2c-peripheral
   Does it have MOSI/MISO/SCK/CS?                                      -> spi-peripheral
   Does one pin just go high or low when a quantity crosses a point?   -> threshold-switch
+  Is it a bipolar transistor with a collector, base and emitter?      -> transistor
   Is it only resistors, capacitors, diodes or LEDs?                   -> passive
 If the part genuinely fits none of these, pick the closest, set confidence below 0.5, and say so in
 unresolved.
+
+DISCRETE SEMICONDUCTORS. A transistor has no state variable and no protocol -- it amplifies. Use
+the transistor archetype rather than forcing it into "passive": a passive approximation cannot
+switch, cannot saturate, and produces a part that looks right on the canvas and does nothing in the
+circuit.
 
 STATE VARIABLES. Any part that senses something needs the quantity it senses declared in "state",
 or it will sense nothing forever. A rangefinder needs a distance; a thermometer needs a temperature.

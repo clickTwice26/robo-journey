@@ -20,7 +20,16 @@ import {
   unregisterPart,
   validateManifest,
 } from '@robo-journey/parts';
-import { digitalChannel, loadHex } from '@robo-journey/sim-core';
+import {
+  Bjt,
+  Circuit,
+  GROUND,
+  Led,
+  Resistor,
+  VoltageSource,
+  digitalChannel,
+  loadHex,
+} from '@robo-journey/sim-core';
 import { extractManifest } from '../src/index.js';
 
 const apiKey = process.env.GEMINI_API_KEY ?? '';
@@ -69,6 +78,28 @@ Temperature Range: -40 degC to +125 degC
 Package: TO-92, 3 leads, 2.54 mm lead spacing
 
 Pin 1 = +Vs, Pin 2 = Vout, Pin 3 = GND
+`;
+
+const BC547_DATASHEET = `
+BC546/BC547/BC548 NPN General Purpose Amplifier
+
+TO-92 package. Absolute maximum ratings (Ta = 25 C):
+Collector-Base Voltage BC547: 50 V
+Collector-Emitter Voltage BC547: 45 V
+Emitter-Base Voltage: 6.0 V
+Collector Current (DC): 100 mA
+Power Dissipation: 625 mW
+Operating and Storage Junction Temperature Range: -55 to +150 C
+
+Electrical Characteristics (Ta = 25 C):
+Collector-Emitter Saturation Voltage: 90 mV typ, 250 mV max at Ic = 10 mA, Ib = 0.5 mA
+Base-Emitter On Voltage: 660 mV typ at Vce = 5 V, Ic = 2 mA
+DC Current Gain hFE at Ic = 2 mA, Vce = 5 V:
+  BC547A: 110 to 220
+  BC547B: 200 to 450, typical 290
+Transition Frequency: 300 MHz
+
+Pin 1 = Emitter, Pin 2 = Base, Pin 3 = Collector (flat face toward you, left to right)
 `;
 
 const firmware = (name: string): string =>
@@ -197,6 +228,65 @@ describeIfKey('extracting from a datasheet', () => {
         board.runFor(0.01);
         // The datasheet's own worked example: 750 mV at 25 C.
         expect(board.voltage('A0')).toBeCloseTo(0.75, 2);
+      } finally {
+        unregisterPart(manifest.id);
+      }
+    },
+    120_000,
+  );
+
+  it(
+    'reads a BC547 into a transistor that actually switches',
+    async () => {
+      // Before the transistor archetype existed the model was forced into "passive" and said so
+      // honestly in unresolved -- a part that drew correctly and did nothing. This checks it now
+      // amplifies.
+      const result = await extractManifest({
+        apiKey,
+        input: { kind: 'text', text: BC547_DATASHEET },
+        hint: 'BC547 NPN transistor',
+      });
+
+      expect(result.ok).toBe(true);
+      const manifest = result.manifest!;
+      expect(validateManifest(manifest).ok).toBe(true);
+      expect(manifest.behavior.kind).toBe('transistor');
+
+      if (manifest.behavior.kind !== 'transistor') throw new Error('unexpected archetype');
+      const behavior = manifest.behavior;
+      expect(behavior.polarity).toBe('npn');
+      // The datasheet's hFE, not a made-up number.
+      expect(behavior.forwardBeta).toBeGreaterThan(100);
+      expect(behavior.forwardBeta).toBeLessThan(900);
+
+      registerPart(manifestToPartDefinition(manifest));
+      try {
+        // Common-emitter switch: weak base drive, LED in the collector leg.
+        const circuit = new Circuit();
+        const [supply, anode, collector, drive, base] = circuit.addNodes(5);
+        circuit.add(new VoltageSource('VCC', supply!, GROUND, 5));
+        const input = circuit.add(new VoltageSource('VIN', drive!, GROUND, 5));
+        circuit.add(new Resistor('RB', drive!, base!, 10_000));
+        circuit.add(new Resistor('RL', supply!, anode!, 150));
+        const led = circuit.add(new Led('D1', anode!, collector!, 'red'));
+        const q = circuit.add(
+          new Bjt('Q1', collector!, base!, GROUND, behavior.polarity, {
+            saturationCurrent: behavior.saturationCurrent,
+            forwardBeta: behavior.forwardBeta,
+            reverseBeta: behavior.reverseBeta,
+            forwardEmission: 1,
+            reverseEmission: 1,
+          }),
+        );
+
+        circuit.solve();
+        expect(led.brightness).toBeGreaterThan(0.5);
+        // The point of a transistor: far more through the load than into the base.
+        expect(led.current / q.baseCurrent).toBeGreaterThan(20);
+
+        input.volts = 0;
+        circuit.solve();
+        expect(led.brightness).toBeLessThan(0.05);
       } finally {
         unregisterPart(manifest.id);
       }

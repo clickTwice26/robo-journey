@@ -7,6 +7,7 @@
  * described impossible physics would fail at run time instead of at load time.
  */
 import {
+  Bjt,
   GROUND,
   Led,
   type Device,
@@ -152,6 +153,10 @@ export class ManifestDevice implements Device {
   // ---------------------------------------------------------------------------------------------
 
   stamp(ctx: StampContext): void {
+    // A transistor's terminals belong to the Bjt device; stamping generic pin models on top would
+    // hang stray impedances off the collector and base and skew every operating point.
+    if (this.manifest.behavior.kind === 'transistor') return;
+
     for (const pin of this.manifest.pins) this.stampPin(ctx, pin);
     this.stampBehavior(ctx);
   }
@@ -467,6 +472,28 @@ export function manifestToPartDefinition(
         }
       }
 
+      // Transistors get a real Ebers-Moll device rather than a pin-model approximation, for the
+      // same reason LEDs do: they are nonlinear and deserve proper Newton treatment.
+      if (manifest.behavior.kind === 'transistor') {
+        const behavior = manifest.behavior;
+        ctx.add(
+          new Bjt(
+            ctx.partId,
+            nodes.get(behavior.collectorPin) ?? GROUND,
+            nodes.get(behavior.basePin) ?? GROUND,
+            nodes.get(behavior.emitterPin) ?? GROUND,
+            behavior.polarity,
+            {
+              saturationCurrent: behavior.saturationCurrent,
+              forwardBeta: behavior.forwardBeta,
+              reverseBeta: behavior.reverseBeta,
+              forwardEmission: 1,
+              reverseEmission: 1,
+            },
+          ),
+        );
+      }
+
       ctx.add(new ManifestDevice(ctx.partId, { manifest, state, nodes, supplyVolts }));
     },
   };
@@ -518,6 +545,8 @@ function mapCategory(category: ComponentManifest['category']): PartDefinition['c
   switch (category) {
     case 'sensor':
       return 'input';
+    case 'logic':
+      return 'passive';
     case 'actuator':
     case 'display':
       return 'output';

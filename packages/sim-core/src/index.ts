@@ -43,6 +43,9 @@ export {
 } from './analog/constants.js';
 
 export {
+  BJT_2N3904,
+  BJT_BC547,
+  Bjt,
   Capacitor,
   CurrentSource,
   DIODE_1N4148,
@@ -55,6 +58,8 @@ export {
   ledModel,
 } from './analog/devices.js';
 export type {
+  BjtModel,
+  BjtPolarity,
   Device,
   DiodeModel,
   IntegrationMethod,
