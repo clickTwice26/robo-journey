@@ -55,7 +55,6 @@ describe('signing in', () => {
     const { app } = freshServer();
     const { body } = await registerUser(app, 'ada@example.com');
     expect(body.access.state).toBe('active');
-    expect(body.access.capacity).toBe(2);
   });
 
   it('puts you in the queue when there is not', async () => {
@@ -68,7 +67,6 @@ describe('signing in', () => {
     const { body } = await registerUser(app, 'c@example.com');
     expect(body.access.state).toBe('queued');
     expect(body.access.position).toBe(1);
-    expect(body.access.estimatedWaitMs).toBeGreaterThan(0);
   });
 
   it('reports where you stand alongside who you are', async () => {
@@ -82,14 +80,20 @@ describe('signing in', () => {
     expect(body.access.expiresAt).toBeTruthy();
   });
 
-  it('shows how busy it is before anyone signs in', async () => {
-    // On the sign-in screen, so a queue is visible before a password is typed rather than after.
-    const { app } = freshServer();
+  it('keeps the seat count and the wait to itself', async () => {
+    // Not merely absent from the interface -- absent from the wire, so there is nothing to read
+    // out of a network tab and nothing to work a return time out from.
+    const { app } = freshServer({ capacity: 1 });
     await registerUser(app, 'a@example.com');
+    const { body } = await registerUser(app, 'b@example.com');
 
-    const response = await app.inject({ method: 'GET', url: '/access/occupancy' });
-    expect(response.statusCode).toBe(200);
-    expect(response.json().occupancy).toEqual({ active: 1, waiting: 0, capacity: 2 });
+    expect(body.access.state).toBe('queued');
+    expect(body.access).not.toHaveProperty('capacity');
+    expect(body.access).not.toHaveProperty('active');
+    expect(body.access).not.toHaveProperty('estimatedWaitMs');
+
+    // And the endpoint that used to publish it is gone.
+    expect((await app.inject({ method: 'GET', url: '/access/occupancy' })).statusCode).toBe(404);
   });
 
   it('logging in again during a cooldown succeeds and says how long is left', async () => {
@@ -241,14 +245,12 @@ describe('the queue', () => {
 
   it('gives the seat back when someone signs out', async () => {
     const { app } = freshServer({ capacity: 1 });
-    const { cookie } = await registerUser(app, 'a@example.com');
-    await app.inject({ method: 'POST', url: '/auth/logout', headers: { cookie } });
+    const holder = await registerUser(app, 'a@example.com');
+    const waiter = await registerUser(app, 'b@example.com');
+    expect(waiter.body.access.state).toBe('queued');
 
-    expect((await app.inject({ method: 'GET', url: '/access/occupancy' })).json().occupancy).toEqual({
-      active: 0,
-      waiting: 0,
-      capacity: 1,
-    });
+    await app.inject({ method: 'POST', url: '/auth/logout', headers: { cookie: holder.cookie } });
+    expect((await heartbeat(app, waiter.cookie)).json().access.state).toBe('active');
   });
 
   it('refuses to re-queue during a cooldown, and says when it ends', async () => {

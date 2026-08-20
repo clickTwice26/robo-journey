@@ -138,20 +138,8 @@ function SignIn({ gate }: { gate: Gate }) {
     }
   }, [displayName, email, gate, mode, password]);
 
-  const capacity = gate.occupancy?.capacity ?? 10;
-  const full = (gate.occupancy?.active ?? 0) >= capacity;
-
   return (
     <Shell>
-      <Occupancy occupancy={gate.occupancy} />
-
-      {full && mode === 'login' && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          Every seat is taken. Signing in will put you in the queue, and you will be let in
-          automatically.
-        </Alert>
-      )}
-
       <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
         {mode === 'login' ? 'Sign in' : 'Create an account'}
       </Typography>
@@ -220,7 +208,7 @@ function SignIn({ gate }: { gate: Gate }) {
         </Link>
       </Typography>
 
-      <Rules capacity={capacity} />
+      <Rules />
     </Shell>
   );
 }
@@ -230,20 +218,14 @@ function SignIn({ gate }: { gate: Gate }) {
 /**
  * The line, drawn as a line.
  *
- * A bare position number leaves people guessing at what it means. Seats and waiting places shown
- * as one row makes the whole situation legible at a glance: how many are in use, how many are
- * ahead, and exactly where you are among them.
+ * Places in the queue and where you are among them, which is the one thing a person waiting
+ * actually needs. The seats themselves are not drawn: ten dots is ten seats stated in another
+ * form, and the whole point of leaving the count out is not to state it.
  *
  * Long queues are elided in the middle rather than drawn to a hundred dots, keeping your own
  * marker and both ends visible.
  */
-function QueueLine({ position, waiting, capacity, active }: {
-  position: number;
-  waiting: number;
-  capacity: number;
-  active: number;
-}) {
-  const seats = Array.from({ length: capacity }, (_, i) => i < active);
+function QueueLine({ position, waiting }: { position: number; waiting: number }) {
   const places = Array.from({ length: waiting }, (_, i) => i + 1);
   const shown = places.length <= 12
     ? places
@@ -251,7 +233,7 @@ function QueueLine({ position, waiting, capacity, active }: {
         .filter((value, index, all) => all.indexOf(value) === index)
         .sort((a, b) => a - b);
 
-  const dot = (key: string, filled: boolean, mine: boolean, label: string) => (
+  const dot = (key: string, mine: boolean, label: string) => (
     <Tooltip key={key} title={label}>
       <Box
         sx={{
@@ -259,9 +241,9 @@ function QueueLine({ position, waiting, capacity, active }: {
           height: mine ? 14 : 10,
           borderRadius: '50%',
           flexShrink: 0,
-          bgcolor: mine ? 'primary.main' : filled ? 'success.main' : 'transparent',
+          bgcolor: mine ? 'primary.main' : 'transparent',
           border: 1,
-          borderColor: mine ? 'primary.main' : filled ? 'success.main' : 'divider',
+          borderColor: mine ? 'primary.main' : 'divider',
           boxShadow: mine ? (theme) => `0 0 0 3px ${theme.palette.primary.main}33` : 'none',
         }}
       />
@@ -270,14 +252,11 @@ function QueueLine({ position, waiting, capacity, active }: {
 
   return (
     <Box sx={{ width: '100%' }}>
-      <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}>
-        {seats.map((filled, i) =>
-          dot(`seat-${i}`, filled, false, filled ? 'Seat in use' : 'Free seat'),
-        )}
-        {/* Seats to the left of this, the line to the right. `'1px'` and not `1`: in MUI's
-            style system a bare number between 0 and 1 is a fraction, so `width: 1` renders a
-            full-width bar that pushes the queue onto its own row. */}
-        <Box sx={{ width: '1px', alignSelf: 'stretch', minHeight: 16, bgcolor: 'divider', mx: 0.75 }} />
+      <Stack
+        direction="row"
+        spacing={0.75}
+        sx={{ alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 0.75 }}
+      >
         {shown.map((place, index) => (
           <Box key={`place-${place}`} sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
             {index > 0 && shown[index - 1]! < place - 1 && (
@@ -285,17 +264,9 @@ function QueueLine({ position, waiting, capacity, active }: {
                 …
               </Typography>
             )}
-            {dot(`p-${place}`, false, place === position, place === position ? 'You' : `Waiting, #${place}`)}
+            {dot(`p-${place}`, place === position, place === position ? 'You' : `Waiting, #${place}`)}
           </Box>
         ))}
-      </Stack>
-      <Stack direction="row" sx={{ justifyContent: 'space-between', mt: 0.75 }}>
-        <Typography variant="caption" color="text.secondary">
-          {active} of {capacity} seats
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          {waiting} waiting
-        </Typography>
       </Stack>
     </Box>
   );
@@ -303,7 +274,6 @@ function QueueLine({ position, waiting, capacity, active }: {
 
 function Queued({ gate, access }: { gate: Gate; access: AccessStatus }) {
   const position = access.position ?? 1;
-  const wait = access.estimatedWaitMs;
 
   return (
     <Shell>
@@ -329,22 +299,11 @@ function Queued({ gate, access }: { gate: Gate; access: AccessStatus }) {
           </Alert>
         )}
 
-        <QueueLine
-          position={position}
-          waiting={access.waiting}
-          capacity={access.capacity}
-          active={access.active}
-        />
+        <QueueLine position={position} waiting={access.waiting} />
 
         <Box sx={{ width: '100%' }}>
           <LinearProgress />
         </Box>
-
-        {wait !== null && wait > 0 && (
-          <Typography variant="body2" color="text.secondary" align="center">
-            At most <strong>{formatDuration(wait)}</strong> — sooner if someone finishes early.
-          </Typography>
-        )}
 
         <Typography variant="caption" color="text.secondary" align="center">
           Leave this page open; your place is held while it is. When your turn comes, be at the
@@ -361,10 +320,6 @@ function Queued({ gate, access }: { gate: Gate; access: AccessStatus }) {
 
 function Cooldown({ gate, access }: { gate: Gate; access: AccessStatus }) {
   const remaining = useCountdown(access.cooldownUntil);
-  // From the occupancy poll, not from `access`. Nothing heartbeats during a cooldown, so the
-  // counts inside `access` are frozen at whatever they were when the page loaded -- which read
-  // "0 of 10 in use" on a completely full server.
-  const seats = gate.occupancy ?? access;
   const over = remaining !== null && remaining <= 0;
 
   // Rejoin as soon as the clock runs out, without making anyone watch for the moment.
@@ -387,8 +342,7 @@ function Cooldown({ gate, access }: { gate: Gate; access: AccessStatus }) {
           automatically when it ends.
         </Typography>
         <Typography variant="caption" color="text.secondary" align="center">
-          Your circuits are saved. Nothing is lost — {seats.active} of {seats.capacity} seats are
-          in use right now.
+          Your circuits are saved. Nothing is lost.
         </Typography>
 
         <Button size="small" color="inherit" onClick={() => void gate.signOut()}>
@@ -399,13 +353,11 @@ function Cooldown({ gate, access }: { gate: Gate; access: AccessStatus }) {
   );
 }
 
-function Idle({ gate, access }: { gate: Gate; access: AccessStatus | null }) {
+function Idle({ gate }: { gate: Gate }) {
   const [busy, setBusy] = useState(false);
-  // Live counts for the same reason as the cooldown screen: nothing is heartbeating here either.
 
   return (
     <Shell>
-      <Occupancy occupancy={gate.occupancy ?? access} />
       <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
         Ready when you are
       </Typography>
@@ -435,7 +387,7 @@ function Idle({ gate, access }: { gate: Gate; access: AccessStatus | null }) {
         Sign out
       </Button>
 
-      <Rules capacity={access?.capacity ?? gate.occupancy?.capacity ?? 10} />
+      <Rules />
     </Shell>
   );
 }
@@ -474,7 +426,7 @@ export function AccessGate({ gate }: { gate: Gate }) {
     case 'cooldown':
       return <Cooldown gate={gate} access={gate.access!} />;
     case 'idle':
-      return <Idle gate={gate} access={gate.access} />;
+      return <Idle gate={gate} />;
     default:
       return <SignIn gate={gate} />;
   }
