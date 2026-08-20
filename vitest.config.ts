@@ -17,6 +17,11 @@ export default defineConfig({
   },
   test: {
     include: ['packages/*/test/**/*.test.ts'],
+    // Brings up a Postgres and a Redis for the run, and takes them away afterwards. Suites that
+    // need them skip when Docker is not available rather than failing.
+    globalSetup: ['./test/containers.ts'],
+    // Long enough for a cold image pull on the first run.
+    hookTimeout: 120_000,
     // Benchmarks are excluded here and run by `npm run bench`. Vitest runs test files in
     // parallel, so a wall-clock assertion competing with eleven other files measures CPU
     // contention rather than the solver -- it read 0.81x under load and 2.05x alone.

@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+**/dist
+.git
+.github
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+!.env.example
+apps/studio/dist
+coverage
+.DS_Store

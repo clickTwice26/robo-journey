@@ -125,7 +125,16 @@ function assertSafeName(name: string): void {
 
 export interface CompilerOptions {
   readonly image?: string;
-  /** Use a locally installed arduino-cli instead of Docker. */
+  /**
+   * Where the toolchain lives.
+   *
+   * `docker` runs the pinned image, which is right on a developer machine with Docker but no
+   * arduino-cli installed. `local` runs the binary on PATH, which is what the service container
+   * provides -- running the service in a container and still choosing `docker` would mean mounting
+   * the host's Docker socket, and that hands the container root on the host.
+   */
+  readonly mode?: 'local' | 'docker';
+  /** @deprecated Use `mode`. Kept so existing callers keep working. */
   readonly local?: boolean;
 }
 
@@ -135,7 +144,12 @@ export class ArduinoCompiler {
 
   constructor(options: CompilerOptions = {}) {
     this.image = options.image ?? DEFAULT_IMAGE;
-    this.local = options.local ?? false;
+    this.local = options.mode !== undefined ? options.mode === 'local' : (options.local ?? false);
+  }
+
+  /** The cache key for a request, without compiling it. */
+  hashRequest(request: CompileRequest): string {
+    return hashRequest(request);
   }
 
   /**

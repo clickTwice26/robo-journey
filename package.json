@@ -2,7 +2,7 @@
   "name": "robo-journey",
   "version": "0.0.0",
   "private": true,
-  "description": "A hardware-accurate Arduino circuit simulator \u2014 real firmware execution on an emulated ATmega328P, coupled to a real analog circuit solver.",
+  "description": "A hardware-accurate Arduino circuit simulator — real firmware execution on an emulated ATmega328P, coupled to a real analog circuit solver.",
   "license": "MIT",
   "type": "module",
   "workspaces": [
@@ -31,6 +31,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/pg": "8.15.6",
     "typescript": "^5.9.0",
     "vitest": "^4.1.11"
   }

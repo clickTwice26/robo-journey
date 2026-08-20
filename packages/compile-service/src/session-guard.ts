@@ -23,19 +23,22 @@ export const SESSION_COOKIE = 'rj_session';
 
 export interface Guards {
   /** Whoever is signed in, or null. Never sends a reply. */
-  currentUser(request: FastifyRequest): PublicUser | null;
+  currentUser(request: FastifyRequest): Promise<PublicUser | null>;
   /** Signed in, or a 401. Returns null once the reply has been sent. */
-  requireUser(request: FastifyRequest, reply: FastifyReply): PublicUser | null;
+  requireUser(request: FastifyRequest, reply: FastifyReply): Promise<PublicUser | null>;
   /** Signed in *and* holding a seat, or a 401/403. Returns null once the reply has been sent. */
-  requireSeat(request: FastifyRequest, reply: FastifyReply): PublicUser | null;
+  requireSeat(request: FastifyRequest, reply: FastifyReply): Promise<PublicUser | null>;
 }
 
 export function createGuards(store: AccountStore): Guards {
-  const currentUser = (request: FastifyRequest): PublicUser | null =>
+  const currentUser = (request: FastifyRequest): Promise<PublicUser | null> =>
     store.resolveSession(request.cookies[SESSION_COOKIE]);
 
-  const requireUser = (request: FastifyRequest, reply: FastifyReply): PublicUser | null => {
-    const user = currentUser(request);
+  const requireUser = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<PublicUser | null> => {
+    const user = await currentUser(request);
     if (!user) {
       void reply.status(401).send({ error: 'Not signed in.' });
       return null;
@@ -43,11 +46,14 @@ export function createGuards(store: AccountStore): Guards {
     return user;
   };
 
-  const requireSeat = (request: FastifyRequest, reply: FastifyReply): PublicUser | null => {
-    const user = requireUser(request, reply);
+  const requireSeat = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<PublicUser | null> => {
+    const user = await requireUser(request, reply);
     if (!user) return null;
 
-    const status = store.access.status(user.id);
+    const status = await store.access.status(user.id);
     if (status.state === 'active') return user;
 
     // 403 rather than 401: the caller is who they say they are, they are simply not allowed

@@ -4,6 +4,12 @@
  * Accounts, sessions and project storage. Server-side only: importing this into the browser would
  * put password hashing and the database in the bundle.
  */
+export { createPool, waitForDatabase, withTransaction } from './db.js';
+export type { DatabaseOptions } from './db.js';
+
+export { MIGRATIONS, appliedMigrations, migrate } from './migrations.js';
+export type { Migration } from './migrations.js';
+
 export {
   AccountError,
   AccountStore,
@@ -13,6 +19,7 @@ export {
   SESSION_TTL_MS,
   isPlausibleEmail,
   normaliseEmail,
+  isUuid,
   safeEqual,
 } from './store.js';
 export type { ProjectSummary, PublicUser, StoredProject } from './store.js';

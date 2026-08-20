@@ -21,7 +21,8 @@ import {
   WeakPasswordError,
   type AccessStatus,
 } from '@robo-journey/accounts';
-import { RateLimiter } from './rate-limit.js';
+import type { Redis } from 'ioredis';
+import { RedisRateLimiter } from './redis.js';
 import { SESSION_COOKIE, type Guards } from './session-guard.js';
 
 /**
@@ -40,11 +41,11 @@ import { SESSION_COOKIE, type Guards } from './session-guard.js';
  * which is wrong for tests that each expect a clean slate and would be wrong again for any setup
  * that runs more than one server in a process.
  */
-function createLimiters() {
+function createLimiters(redis: Redis) {
   return {
-    loginByAddress: new RateLimiter(30, 5 * 60 * 1000),
-    loginByAccount: new RateLimiter(5, 15 * 60 * 1000),
-    registerByAddress: new RateLimiter(40, 60 * 60 * 1000),
+    loginByAddress: new RedisRateLimiter(redis, 30, 5 * 60 * 1000, 'login-ip'),
+    loginByAccount: new RedisRateLimiter(redis, 5, 15 * 60 * 1000, 'login-account'),
+    registerByAddress: new RedisRateLimiter(redis, 40, 60 * 60 * 1000, 'register-ip'),
   };
 }
 
@@ -52,6 +53,11 @@ function createLimiters() {
 const MAX_PROJECTS = 200;
 /** Largest project document accepted, bytes. A big circuit is tens of kilobytes. */
 const MAX_DOCUMENT_BYTES = 4 * 1024 * 1024;
+
+/** Byte length as stored, so a document of multi-byte characters is measured honestly. */
+function documentTooLarge(document: unknown): boolean {
+  return Buffer.byteLength(JSON.stringify(document) ?? '') > MAX_DOCUMENT_BYTES;
+}
 
 interface Credentials {
   email?: string;
@@ -67,12 +73,13 @@ interface ProjectBody {
 export interface AuthRouteOptions {
   readonly store: AccountStore;
   readonly guards: Guards;
+  readonly redis: Redis;
 }
 
 export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptions): void {
-  const { store, guards } = options;
+  const { store, guards, redis } = options;
   const { currentUser, requireUser } = guards;
-  const { loginByAddress, loginByAccount, registerByAddress } = createLimiters();
+  const { loginByAddress, loginByAccount, registerByAddress } = createLimiters(redis);
 
   /**
    * Join the queue, tolerating a cooldown.
@@ -81,9 +88,9 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
    * how long is left -- so it must not fail the sign-in. The status returned says where they
    * stand either way.
    */
-  const requestOrReport = (userId: string): AccessStatus => {
+  const requestOrReport = async (userId: string): Promise<AccessStatus> => {
     try {
-      return store.access.request(userId);
+      return await store.access.request(userId);
     } catch (error) {
       if (error instanceof CooldownError) return store.access.status(userId);
       throw error;
@@ -132,15 +139,15 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
   // --- Auth ---------------------------------------------------------------------------------------
 
   app.get('/auth/me', async (request, reply) => {
-    const user = currentUser(request);
+    const user = await currentUser(request);
     // The access status travels with the identity, so the app can decide in one request whether to
     // show the workspace, the queue or the countdown.
-    return reply.send({ user, access: user ? store.access.status(user.id) : null });
+    return reply.send({ user, access: user ? await store.access.status(user.id) : null });
   });
 
   app.post<{ Body: Credentials }>('/auth/register', async (request, reply) => {
     const address = request.ip;
-    const limit = registerByAddress.check(`register:${address}`);
+    const limit = await registerByAddress.check(address);
     if (!limit.allowed) {
       return reply
         .status(429)
@@ -155,12 +162,12 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
 
     try {
       const user = await store.register(email, password, displayName ?? '');
-      const session = store.createSession(user.id);
+      const session = await store.createSession(user.id);
       setSessionCookie(request, reply, session.token);
       // Signed in immediately: making someone log in again right after registering is friction
       // with no security benefit. Registration is free and unlimited -- it is the *seat* that is
       // rationed -- so a new account goes straight into the queue like any other.
-      return reply.status(201).send({ user, access: requestOrReport(user.id) });
+      return reply.status(201).send({ user, access: await requestOrReport(user.id) });
     } catch (error) {
       return sendAccountError(reply, error);
     }
@@ -172,8 +179,10 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
       return reply.status(400).send({ error: 'Email and password are required.' });
     }
 
-    const byAddress = loginByAddress.check(`login:${request.ip}`);
-    const byAccount = loginByAccount.check(`login:${email.trim().toLowerCase()}`);
+    const [byAddress, byAccount] = await Promise.all([
+      loginByAddress.check(request.ip),
+      loginByAccount.check(email.trim().toLowerCase()),
+    ]);
     if (!byAddress.allowed || !byAccount.allowed) {
       const retryAfter = Math.max(byAddress.retryAfter, byAccount.retryAfter);
       return reply
@@ -184,14 +193,14 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
 
     try {
       const user = await store.authenticate(email, password);
-      const session = store.createSession(user.id);
+      const session = await store.createSession(user.id);
       setSessionCookie(request, reply, session.token);
       // A successful sign-in clears the account's counter, so one forgotten password does not
       // lock someone out for the rest of the window.
-      loginByAccount.reset(`login:${email.trim().toLowerCase()}`);
+      await loginByAccount.reset(email.trim().toLowerCase());
       // Signing in is what puts someone in the queue: there is no separate button to press, and
       // no state where they are signed in and have not asked for a seat.
-      return reply.send({ user, access: requestOrReport(user.id) });
+      return reply.send({ user, access: await requestOrReport(user.id) });
     } catch (error) {
       return sendAccountError(reply, error);
     }
@@ -200,19 +209,19 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
   app.post('/auth/logout', async (request, reply) => {
     // Give the seat back on the way out, so signing out frees it for whoever is waiting rather
     // than leaving it held by nobody until the heartbeat grace runs out.
-    const user = currentUser(request);
-    if (user) store.access.release(user.id);
+    const user = await currentUser(request);
+    if (user) await store.access.release(user.id);
 
-    store.destroySession(request.cookies[SESSION_COOKIE]);
+    await store.destroySession(request.cookies[SESSION_COOKIE]);
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
     return reply.send({ ok: true });
   });
 
   app.post('/auth/logout-everywhere', async (request, reply) => {
-    const user = requireUser(request, reply);
+    const user = await requireUser(request, reply);
     if (!user) return reply;
-    store.access.release(user.id);
-    store.destroyAllSessions(user.id);
+    await store.access.release(user.id);
+    await store.destroyAllSessions(user.id);
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
     return reply.send({ ok: true });
   });
@@ -220,23 +229,23 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
   // --- Access ------------------------------------------------------------------------------------
 
   app.get('/access', async (request, reply) => {
-    const user = requireUser(request, reply);
+    const user = await requireUser(request, reply);
     if (!user) return reply;
-    return reply.send({ access: store.access.status(user.id) });
+    return reply.send({ access: await store.access.status(user.id) });
   });
 
   app.post('/access', async (request, reply) => {
-    const user = requireUser(request, reply);
+    const user = await requireUser(request, reply);
     if (!user) return reply;
 
     try {
-      return reply.send({ access: store.access.request(user.id) });
+      return reply.send({ access: await store.access.request(user.id) });
     } catch (error) {
       if (error instanceof CooldownError) {
         return reply
           .status(429)
           .header('Retry-After', Math.ceil((error.until.getTime() - Date.now()) / 1000))
-          .send({ error: error.message, access: store.access.status(user.id) });
+          .send({ error: error.message, access: await store.access.status(user.id) });
       }
       throw error;
     }
@@ -249,33 +258,33 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
    * admitted, or that its hour is over, so it doubles as the status endpoint while waiting.
    */
   app.post<{ Body: { present?: boolean } }>('/access/heartbeat', async (request, reply) => {
-    const user = requireUser(request, reply);
+    const user = await requireUser(request, reply);
     if (!user) return reply;
     // Absent means the page is open but nobody is at it. Defaults to present so a client that
     // does not report it is never punished for the omission.
     const present = request.body?.present !== false;
-    return reply.send({ access: store.access.heartbeat(user.id, present) });
+    return reply.send({ access: await store.access.heartbeat(user.id, present) });
   });
 
   app.post('/access/release', async (request, reply) => {
-    const user = requireUser(request, reply);
+    const user = await requireUser(request, reply);
     if (!user) return reply;
-    return reply.send({ access: store.access.release(user.id) });
+    return reply.send({ access: await store.access.release(user.id) });
   });
 
   // --- Projects -----------------------------------------------------------------------------------
 
   app.get('/projects', async (request, reply) => {
-    const user = requireUser(request, reply);
+    const user = await requireUser(request, reply);
     if (!user) return reply;
-    return reply.send({ projects: store.listProjects(user.id) });
+    return reply.send({ projects: await store.listProjects(user.id) });
   });
 
   app.get<{ Params: { id: string } }>('/projects/:id', async (request, reply) => {
-    const user = requireUser(request, reply);
+    const user = await requireUser(request, reply);
     if (!user) return reply;
 
-    const project = store.getProject(user.id, request.params.id);
+    const project = await store.getProject(user.id, request.params.id);
     // Someone else's project and a missing one are the same answer, so an id guess cannot confirm
     // that a project exists.
     if (!project) return reply.status(404).send({ error: 'No such project.' });
@@ -283,15 +292,18 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
   });
 
   app.post<{ Body: ProjectBody }>('/projects', async (request, reply) => {
-    const user = requireUser(request, reply);
+    const user = await requireUser(request, reply);
     if (!user) return reply;
 
     const body = request.body ?? {};
-    const document = JSON.stringify(body.document ?? {});
-    if (document.length > MAX_DOCUMENT_BYTES) {
+    const document = body.document ?? {};
+    // Measured as it would be stored, not as the object it currently is. The column is JSONB, so
+    // the document is passed through as a value rather than pre-encoded -- encoding it here and
+    // again in the driver would store a JSON string containing JSON.
+    if (documentTooLarge(document)) {
       return reply.status(413).send({ error: 'That project is too large to store.' });
     }
-    if (store.countProjects(user.id) >= MAX_PROJECTS) {
+    if ((await store.countProjects(user.id)) >= MAX_PROJECTS) {
       return reply
         .status(409)
         .send({ error: `You have reached the limit of ${MAX_PROJECTS} saved projects.` });
@@ -299,22 +311,22 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
 
     return reply
       .status(201)
-      .send({ project: store.createProject(user.id, body.name ?? 'Untitled', document) });
+      .send({ project: await store.createProject(user.id, body.name ?? 'Untitled', document) });
   });
 
   app.put<{ Params: { id: string }; Body: ProjectBody }>('/projects/:id', async (request, reply) => {
-    const user = requireUser(request, reply);
+    const user = await requireUser(request, reply);
     if (!user) return reply;
 
     const body = request.body ?? {};
-    const document = JSON.stringify(body.document ?? {});
-    if (document.length > MAX_DOCUMENT_BYTES) {
+    const document = body.document ?? {};
+    if (documentTooLarge(document)) {
       return reply.status(413).send({ error: 'That project is too large to store.' });
     }
 
     try {
       return reply.send({
-        project: store.updateProject(user.id, request.params.id, body.name ?? 'Untitled', document),
+        project: await store.updateProject(user.id, request.params.id, body.name ?? 'Untitled', document),
       });
     } catch (error) {
       return sendAccountError(reply, error);
@@ -322,10 +334,10 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
   });
 
   app.delete<{ Params: { id: string } }>('/projects/:id', async (request, reply) => {
-    const user = requireUser(request, reply);
+    const user = await requireUser(request, reply);
     if (!user) return reply;
     try {
-      store.deleteProject(user.id, request.params.id);
+      await store.deleteProject(user.id, request.params.id);
       return reply.send({ ok: true });
     } catch (error) {
       return sendAccountError(reply, error);

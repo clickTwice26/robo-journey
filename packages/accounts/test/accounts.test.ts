@@ -6,7 +6,7 @@
  * that one user cannot reach another's projects, and that a session token is useless once revoked.
  * Those are the things that are quiet when broken.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   AccountStore,
   EmailInUseError,
@@ -19,11 +19,27 @@ import {
   normaliseEmail,
   verifyPassword,
 } from '../src/index.js';
-
-/** Each test gets its own in-memory database, so none can see another's state. */
-const store = (): AccountStore => new AccountStore(':memory:');
+import { createBackends, hasDatabase, type TestBackends } from '../../../test/database.js';
 
 const GOOD_PASSWORD = 'correct horse battery staple';
+
+const describeWithDb = hasDatabase() ? describe : describe.skip;
+
+/**
+ * A store on a schema of its own, created per test.
+ *
+ * Password hashing is pure and needs no database, so those tests stay outside this and keep
+ * running on a machine without Docker.
+ */
+let backends: TestBackends;
+const store = (): AccountStore => new AccountStore(backends.pool);
+
+function withDatabase(name: string): void {
+  beforeEach(async () => {
+    backends = await createBackends(name);
+  });
+  afterEach(async () => backends.close());
+}
 
 describe('password hashing', () => {
   it('produces a hash that does not contain the password', async () => {
@@ -75,7 +91,9 @@ describe('password hashing', () => {
   });
 });
 
-describe('registration', () => {
+describeWithDb('registration', () => {
+  withDatabase('accounts-registration');
+
   it('creates an account and never returns the hash', async () => {
     const db = store();
     const user = await db.register('Ada@Example.com', GOOD_PASSWORD, 'Ada');
@@ -88,26 +106,26 @@ describe('registration', () => {
   it('treats addresses case-insensitively', async () => {
     const db = store();
     await db.register('ada@example.com', GOOD_PASSWORD, 'Ada');
-    await expect(db.register('ADA@EXAMPLE.COM', GOOD_PASSWORD, 'Ada')).rejects.toThrow(EmailInUseError);
+    await expect(await db.register('ADA@EXAMPLE.COM', GOOD_PASSWORD, 'Ada')).rejects.toThrow(EmailInUseError);
     expect(normaliseEmail('  Ada@Example.COM ')).toBe('ada@example.com');
   });
 
   it('refuses a second account on the same address', async () => {
     const db = store();
     await db.register('ada@example.com', GOOD_PASSWORD, 'Ada');
-    await expect(db.register('ada@example.com', GOOD_PASSWORD, 'Other')).rejects.toThrow(EmailInUseError);
+    await expect(await db.register('ada@example.com', GOOD_PASSWORD, 'Other')).rejects.toThrow(EmailInUseError);
   });
 
   it('refuses an implausible address', async () => {
     const db = store();
-    await expect(db.register('not-an-email', GOOD_PASSWORD, 'X')).rejects.toThrow(/email address/);
+    await expect(await db.register('not-an-email', GOOD_PASSWORD, 'X')).rejects.toThrow(/email address/);
   });
 
   it('refuses a weak password before creating anything', async () => {
     const db = store();
-    await expect(db.register('ada@example.com', 'short', 'Ada')).rejects.toThrow(WeakPasswordError);
+    await expect(await db.register('ada@example.com', 'short', 'Ada')).rejects.toThrow(WeakPasswordError);
     // And leaves no account behind.
-    await expect(db.authenticate('ada@example.com', 'short')).rejects.toThrow(InvalidCredentialsError);
+    await expect(await db.authenticate('ada@example.com', 'short')).rejects.toThrow(InvalidCredentialsError);
   });
 
   it('falls back to the address for a blank display name', async () => {
@@ -116,7 +134,9 @@ describe('registration', () => {
   });
 });
 
-describe('authentication', () => {
+describeWithDb('authentication', () => {
+  withDatabase('accounts-authentication');
+
   it('accepts the right credentials', async () => {
     const db = store();
     const created = await db.register('ada@example.com', GOOD_PASSWORD, 'Ada');
@@ -128,55 +148,64 @@ describe('authentication', () => {
     const db = store();
     await db.register('ada@example.com', GOOD_PASSWORD, 'Ada');
 
-    const wrongPassword = await db.authenticate('ada@example.com', 'wrong password here').catch((e) => e);
-    const noAccount = await db.authenticate('nobody@example.com', GOOD_PASSWORD).catch((e) => e);
+    const wrongPassword = await db
+      .authenticate('ada@example.com', 'wrong password here')
+      .catch((error: unknown) => error);
+    const noAccount = await db
+      .authenticate('nobody@example.com', GOOD_PASSWORD)
+      .catch((error: unknown) => error);
 
     expect(wrongPassword).toBeInstanceOf(InvalidCredentialsError);
     expect(noAccount).toBeInstanceOf(InvalidCredentialsError);
-    expect(wrongPassword.message).toBe(noAccount.message);
+    expect((wrongPassword as Error).message).toBe((noAccount as Error).message);
   });
 });
 
-describe('sessions', () => {
+describeWithDb('sessions', () => {
+  withDatabase('accounts-sessions');
+
   async function signedIn() {
     const db = store();
     const user = await db.register('ada@example.com', GOOD_PASSWORD, 'Ada');
-    const session = db.createSession(user.id);
+    const session = await db.createSession(user.id);
     return { db, user, session };
   }
 
   it('resolves a token to its user', async () => {
     const { db, user, session } = await signedIn();
-    expect(db.resolveSession(session.token)?.id).toBe(user.id);
+    expect((await db.resolveSession(session.token))?.id).toBe(user.id);
   });
 
   it('rejects an unknown or absent token', async () => {
     const { db } = await signedIn();
-    expect(db.resolveSession('not-a-real-token')).toBeNull();
-    expect(db.resolveSession(undefined)).toBeNull();
-    expect(db.resolveSession('')).toBeNull();
+    expect(await db.resolveSession('not-a-real-token')).toBeNull();
+    expect(await db.resolveSession(undefined)).toBeNull();
+    expect(await db.resolveSession('')).toBeNull();
   });
 
   it('stops working once destroyed', async () => {
     const { db, session } = await signedIn();
-    db.destroySession(session.token);
-    expect(db.resolveSession(session.token)).toBeNull();
+    await db.destroySession(session.token);
+    expect(await db.resolveSession(session.token)).toBeNull();
   });
 
   it('signs out everywhere when asked', async () => {
     // What a user wants after losing a laptop.
     const { db, user } = await signedIn();
-    const a = db.createSession(user.id);
-    const b = db.createSession(user.id);
+    const a = await db.createSession(user.id);
+    const b = await db.createSession(user.id);
 
-    db.destroyAllSessions(user.id);
-    expect(db.resolveSession(a.token)).toBeNull();
-    expect(db.resolveSession(b.token)).toBeNull();
+    await db.destroyAllSessions(user.id);
+    expect(await db.resolveSession(a.token)).toBeNull();
+    expect(await db.resolveSession(b.token)).toBeNull();
   });
 
   it('issues a different token every time', async () => {
     const { db, user } = await signedIn();
-    const tokens = new Set(Array.from({ length: 20 }, () => db.createSession(user.id).token));
+    const issued = await Promise.all(
+      Array.from({ length: 20 }, async () => (await db.createSession(user.id)).token),
+    );
+    const tokens = new Set(issued);
     expect(tokens.size).toBe(20);
   });
 
@@ -188,25 +217,27 @@ describe('sessions', () => {
 
   it('expires', async () => {
     const { db, user } = await signedIn();
-    const session = db.createSession(user.id);
+    const session = await db.createSession(user.id);
     // Reach into the database to age it, rather than waiting thirty days.
     const past = new Date(Date.now() - 1000).toISOString();
     // @ts-expect-error -- reaching into the private handle deliberately, for this test only.
     db.db.prepare('UPDATE sessions SET expires_at = ?').run(past);
 
-    expect(db.resolveSession(session.token)).toBeNull();
+    expect(await db.resolveSession(session.token)).toBeNull();
   });
 
   it('prunes expired sessions', async () => {
     const { db, user } = await signedIn();
-    db.createSession(user.id);
+    await db.createSession(user.id);
     // @ts-expect-error -- see above.
     db.db.prepare('UPDATE sessions SET expires_at = ?').run(new Date(Date.now() - 1000).toISOString());
-    expect(db.pruneSessions()).toBeGreaterThan(0);
+    expect(await db.pruneSessions()).toBeGreaterThan(0);
   });
 });
 
-describe('projects', () => {
+describeWithDb('projects', () => {
+  withDatabase('accounts-projects');
+
   async function twoUsers() {
     const db = store();
     const ada = await db.register('ada@example.com', GOOD_PASSWORD, 'Ada');
@@ -216,68 +247,70 @@ describe('projects', () => {
 
   it('stores and returns a project', async () => {
     const { db, ada } = await twoUsers();
-    const created = db.createProject(ada.id, 'Blink', '{"version":1}');
-    expect(db.getProject(ada.id, created.id)?.document).toBe('{"version":1}');
+    const created = await db.createProject(ada.id, 'Blink', { version: 1 });
+    // Stored as JSONB and returned as a value, not as the string it was encoded into. A column of
+    // text holding JSON is queryable by nothing; this one is.
+    expect((await db.getProject(ada.id, created.id))?.document).toEqual({ version: 1 });
   });
 
   it('lists a user projects, most recently updated first', async () => {
     const { db, ada } = await twoUsers();
-    const first = db.createProject(ada.id, 'One', '{}');
-    db.createProject(ada.id, 'Two', '{}');
-    db.updateProject(ada.id, first.id, 'One', '{"changed":true}');
+    const first = await db.createProject(ada.id, 'One', {});
+    await db.createProject(ada.id, 'Two', {});
+    await db.updateProject(ada.id, first.id, 'One', { changed: true });
 
-    expect(db.listProjects(ada.id).map((p) => p.name)).toEqual(['One', 'Two']);
+    expect((await db.listProjects(ada.id)).map((p) => p.name)).toEqual(['One', 'Two']);
   });
 
   it('does not let one user read another projects', async () => {
     // The property that matters most. Scoped in the query rather than fetched and then checked,
     // so there is no path where the check can be skipped.
     const { db, ada, bob } = await twoUsers();
-    const secret = db.createProject(ada.id, 'Ada private work', '{}');
-    expect(db.getProject(bob.id, secret.id)).toBeNull();
+    const secret = await db.createProject(ada.id, 'Ada private work', {});
+    expect(await db.getProject(bob.id, secret.id)).toBeNull();
   });
 
   it('does not let one user update another project', async () => {
     const { db, ada, bob } = await twoUsers();
-    const secret = db.createProject(ada.id, 'Ada', '{}');
-    expect(() => db.updateProject(bob.id, secret.id, 'Hijacked', '{}')).toThrow(NotFoundError);
-    expect(db.getProject(ada.id, secret.id)?.name).toBe('Ada');
+    const secret = await db.createProject(ada.id, 'Ada', {});
+    await expect(db.updateProject(bob.id, secret.id, 'Hijacked', {})).rejects.toThrow(NotFoundError);
+    expect((await db.getProject(ada.id, secret.id))?.name).toBe('Ada');
   });
 
   it('does not let one user delete another project', async () => {
     const { db, ada, bob } = await twoUsers();
-    const secret = db.createProject(ada.id, 'Ada', '{}');
-    expect(() => db.deleteProject(bob.id, secret.id)).toThrow(NotFoundError);
-    expect(db.getProject(ada.id, secret.id)).not.toBeNull();
+    const secret = await db.createProject(ada.id, 'Ada', {});
+    await expect(db.deleteProject(bob.id, secret.id)).rejects.toThrow(NotFoundError);
+    expect(await db.getProject(ada.id, secret.id)).not.toBeNull();
   });
 
   it('keeps each user list to themselves', async () => {
     const { db, ada, bob } = await twoUsers();
-    db.createProject(ada.id, 'Ada one', '{}');
-    db.createProject(bob.id, 'Bob one', '{}');
-    expect(db.listProjects(ada.id).map((p) => p.name)).toEqual(['Ada one']);
-    expect(db.listProjects(bob.id).map((p) => p.name)).toEqual(['Bob one']);
+    await db.createProject(ada.id, 'Ada one', {});
+    await db.createProject(bob.id, 'Bob one', {});
+    expect((await db.listProjects(ada.id)).map((p) => p.name)).toEqual(['Ada one']);
+    expect((await db.listProjects(bob.id)).map((p) => p.name)).toEqual(['Bob one']);
   });
 
   it('deletes a users projects along with the account', async () => {
     const { db, ada } = await twoUsers();
-    db.createProject(ada.id, 'Doomed', '{}');
+    await db.createProject(ada.id, 'Doomed', {});
     // @ts-expect-error -- reaching into the private handle deliberately.
     db.db.prepare('DELETE FROM users WHERE id = ?').run(ada.id);
     // The foreign key cascade must actually be on, or orphaned rows accumulate forever.
-    expect(db.listProjects(ada.id)).toEqual([]);
+    expect(await db.listProjects(ada.id)).toEqual([]);
   });
 
   it('reports a missing project rather than inventing one', async () => {
     const { db, ada } = await twoUsers();
-    expect(db.getProject(ada.id, 'no-such-id')).toBeNull();
-    expect(() => db.deleteProject(ada.id, 'no-such-id')).toThrow(NotFoundError);
+    expect(await db.getProject(ada.id, 'no-such-id')).toBeNull();
+    await expect(db.deleteProject(ada.id, 'no-such-id')).rejects.toThrow(NotFoundError);
   });
 
   it('counts projects for the quota check', async () => {
     const { db, ada } = await twoUsers();
-    expect(db.countProjects(ada.id)).toBe(0);
-    db.createProject(ada.id, 'One', '{}');
-    expect(db.countProjects(ada.id)).toBe(1);
+    expect(await db.countProjects(ada.id)).toBe(0);
+    await db.createProject(ada.id, 'One', {});
+    expect(await db.countProjects(ada.id)).toBe(1);
   });
 });

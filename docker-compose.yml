@@ -1,0 +1,105 @@
+# The full stack.
+#
+#   docker compose up --build
+#
+# Postgres holds everything that must survive a restart: accounts, sessions, projects, and the
+# queue. Redis holds the two things that are better off ephemeral -- rate-limit counters and the
+# compile cache -- and losing all of it costs nothing but a few recompiles.
+#
+# Every service has a health check and every dependency waits on it, because "postgres is
+# listening" and "postgres is ready" are not the same moment and starting into the gap produces a
+# failure that looks like a bug in the application.
+
+name: robo-journey
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-robo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-robo_journey}
+      # Explicit rather than inherited from the host locale, so an index built on one machine
+      # sorts the same way on another.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # `-d` and `-U` matter: without them pg_isready checks the default database and reports
+      # ready while the one this actually uses is still being created.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-robo} -d ${POSTGRES_DB:-robo_journey}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    # Not published by default. The database is reachable from the service over the compose
+    # network and has no business being on the host's interfaces; uncomment for a psql session.
+    # ports: ["28632:5432"]
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    # No persistence configured on purpose: nothing here is worth keeping across a restart, and
+    # an AOF file that grows unbounded is a problem nobody asked for. `allkeys-lru` means a full
+    # cache evicts rather than starting to refuse writes, which would take rate limiting with it.
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-robo}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-robo_journey}
+      REDIS_URL: redis://redis:6379
+      RJ_SERVICE_PORT: 28610
+      RJ_SERVICE_HOST: 0.0.0.0
+      RJ_COMPILER_MODE: local
+      RJ_STATIC_DIR: /app/public
+      RJ_ACCESS_CAPACITY: ${RJ_ACCESS_CAPACITY:-10}
+      RJ_ACCESS_SESSION_MINUTES: ${RJ_ACCESS_SESSION_MINUTES:-60}
+      RJ_ACCESS_COOLDOWN_MINUTES: ${RJ_ACCESS_COOLDOWN_MINUTES:-20}
+      RJ_ACCESS_IDLE_MINUTES: ${RJ_ACCESS_IDLE_MINUTES:-2}
+      # Read from the host environment or .env; never baked into the image.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      # Bound to loopback. Reaching this from another machine should be a deliberate act involving
+      # something that terminates TLS, not a side effect of running compose.
+      - "127.0.0.1:${RJ_PUBLISH_PORT:-28610}:28610"
+    # Compilation writes a sketch to a temporary directory and nothing else writes anywhere. A
+    # read-only root filesystem makes that a property of the container rather than a habit.
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          # An AVR compile is short but not free, and an unbounded container competing with
+          # Postgres for memory is how a machine falls over under load rather than slowing down.
+          cpus: "2.0"
+          memory: 2g
+
+volumes:
+  postgres-data:

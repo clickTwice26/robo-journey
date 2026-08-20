@@ -21,10 +21,12 @@
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",
+    "@fastify/static": "10.1.3",
+    "@robo-journey/accounts": "*",
     "@robo-journey/datasheet": "*",
     "@robo-journey/parts": "*",
     "fastify": "^5.2.0",
-    "@robo-journey/accounts": "*"
+    "ioredis": "6.0.0"
   },
   "devDependencies": {
     "@robo-journey/sim-core": "*"
