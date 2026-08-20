@@ -5,3 +5,8 @@ dist/
 .env
 .vite/
 coverage/
+
+# Account database. Contains password hashes and session tokens — never commit it.
+*.db
+*.db-wal
+*.db-shm

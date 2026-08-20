@@ -12,6 +12,7 @@ export default defineConfig({
       '@robo-journey/compile-service': src('compile-service'),
       '@robo-journey/parts': src('parts'),
       '@robo-journey/datasheet': src('datasheet'),
+      '@robo-journey/accounts': src('accounts'),
     },
   },
   test: {

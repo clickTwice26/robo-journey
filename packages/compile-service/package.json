@@ -20,9 +20,11 @@
     "start": "node --env-file-if-exists=../../.env dist/server.js"
   },
   "dependencies": {
-    "fastify": "^5.2.0",
+    "@fastify/cookie": "^11.1.2",
     "@robo-journey/datasheet": "*",
-    "@robo-journey/parts": "*"
+    "@robo-journey/parts": "*",
+    "fastify": "^5.2.0",
+    "@robo-journey/accounts": "*"
   },
   "devDependencies": {
     "@robo-journey/sim-core": "*"

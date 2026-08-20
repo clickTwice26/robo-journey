@@ -21,6 +21,9 @@
     },
     {
       "path": "../datasheet"
+    },
+    {
+      "path": "../accounts"
     }
   ]
 }

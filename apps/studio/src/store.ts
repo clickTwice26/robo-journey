@@ -9,6 +9,7 @@
 import { create } from 'zustand';
 import { emptyProject, type PartInstance, type Project, type Wire } from '@robo-journey/parts';
 import { EMPTY_SNAPSHOT, type SimSnapshot } from './sim/protocol.ts';
+import { restoreWorkspace } from './persistence.ts';
 
 export type CompileStatus = 'idle' | 'compiling' | 'ok' | 'error';
 
@@ -101,8 +102,17 @@ function withHistory(
   };
 }
 
+/**
+ * Open with whatever was last being worked on.
+ *
+ * Restoring at store creation rather than in an effect means the first render already has the
+ * user's circuit -- no flash of an empty canvas, and no risk of an autosave firing against the
+ * default document before the restore lands and wiping the real one.
+ */
+const initialProject = restoreWorkspace()?.project ?? emptyProject('Blink');
+
 export const useStudio = create<StudioState>((set, get) => ({
-  project: emptyProject('Blink'),
+  project: initialProject,
   past: [],
   future: [],
   snapshot: EMPTY_SNAPSHOT,

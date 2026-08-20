@@ -15,7 +15,7 @@ import {
   type IDockviewPanelProps,
 } from 'dockview-react';
 import 'dockview/dist/styles/dockview.css';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MenuBar, PANELS, type MenuBarActions } from './MenuBar.tsx';
 import { theme } from './theme.ts';
 import { useSimulation } from './sim/useSimulation.ts';
@@ -28,6 +28,8 @@ import { ScopePanel } from './panels/Scope.tsx';
 import { InspectorPanel } from './panels/Inspector.tsx';
 import { DisassemblyPanel } from './panels/Disassembly.tsx';
 import { DatasheetDialog } from './panels/DatasheetDialog.tsx';
+import { AUTOSAVE_DELAY_MS, saveWorkspace } from './persistence.ts';
+import { useStudio } from './store.ts';
 
 /** Titles by panel id, so a closed panel can be recreated with the name it had. */
 const PANEL_TITLES = new Map<string, string>(PANELS.map((panel) => [panel.id, panel.title]));
@@ -44,6 +46,34 @@ export function App() {
    * reporting every panel as closed forever.
    */
   const [revision, forceRender] = useState(0);
+
+  /**
+   * Autosave.
+   *
+   * Debounced, so dragging a part or typing a line does not write on every frame, and subscribed
+   * to the store directly rather than through a hook -- an autosave should not be a reason for the
+   * whole shell to re-render.
+   */
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const unsubscribe = useStudio.subscribe((state, previous) => {
+      if (state.project === previous.project) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => saveWorkspace(useStudio.getState().project), AUTOSAVE_DELAY_MS);
+    });
+
+    // Flush on the way out, so closing the tab mid-debounce still keeps the last edit.
+    const flush = () => saveWorkspace(useStudio.getState().project);
+    window.addEventListener('pagehide', flush);
+
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+      window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, []);
 
   // Panels that query the worker take the controller. Defined inside the component so it is in
   // scope; memoised on the controller, which `useSimulation` keeps referentially stable.

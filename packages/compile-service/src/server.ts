@@ -6,6 +6,8 @@
  */
 import Fastify from 'fastify';
 import { registerDatasheetRoutes } from './datasheet-route.js';
+import { registerAuthRoutes } from './auth-routes.js';
+import { AccountStore } from '@robo-journey/accounts';
 import {
   ArduinoCompiler,
   ToolchainUnavailableError,
@@ -30,7 +32,15 @@ const HOST = process.env.HOST ?? '127.0.0.1';
 const cache = new Map<string, CompileResult>();
 const CACHE_LIMIT = 64;
 
-export function createServer(compiler = new ArduinoCompiler()) {
+/**
+ * Where the account database lives.
+ *
+ * Beside the project by default, so it is obvious, backed up with everything else, and deleted by
+ * deleting the folder. `:memory:` in tests.
+ */
+const DATABASE_FILE = process.env.RJ_DATABASE ?? 'robo-journey.db';
+
+export function createServer(compiler = new ArduinoCompiler(), databaseFile = DATABASE_FILE) {
   // Datasheets are megabytes as base64; the default 1 MB body limit would reject every real one.
   const app = Fastify({ logger: true, bodyLimit: 32 * 1024 * 1024 });
 
@@ -71,6 +81,11 @@ export function createServer(compiler = new ArduinoCompiler()) {
   app.get('/health', async () => ({ ok: true }));
 
   registerDatasheetRoutes(app);
+
+  // Awaited by the caller through `app.ready()`; Fastify queues plugin registration.
+  void app.register(async (instance) => {
+    await registerAuthRoutes(instance, { store: new AccountStore(databaseFile) });
+  });
 
   return app;
 }

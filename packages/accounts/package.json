@@ -1,0 +1,13 @@
+{
+  "name": "@robo-journey/accounts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Accounts and project storage. Server-side only: password hashes and session tokens never leave it.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": { "build": "tsc --build" },
+  "dependencies": { "zod": "^4.4.3" }
+}
