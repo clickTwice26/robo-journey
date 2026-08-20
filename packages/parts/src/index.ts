@@ -52,8 +52,9 @@ export {
   isDriven,
   reachFraction,
   reaches,
+  withinView,
 } from './environment.js';
-export type { EnvironmentSource, Quantity } from './environment.js';
+export type { EnvironmentSource, Quantity, SensorView } from './environment.js';
 
 export { EMISSIONS, STIMULI, environmentSources, isStimulus } from './stimulus.js';
 export type { Emission } from './stimulus.js';

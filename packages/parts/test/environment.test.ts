@@ -23,6 +23,7 @@ import {
   partDefinition,
   reachFraction,
   reaches,
+  withinView,
   type EnvironmentSource,
 } from '../src/index.js';
 
@@ -345,5 +346,69 @@ describe('what the canvas draws', () => {
     // Dropped onto the probe, it reaches.
     const touching = { ...water, x: soil.x, y: soil.y };
     expect(reaches(touching, soil.x, soil.y)).toBe(true);
+  });
+});
+
+describe('where a sensor is pointing', () => {
+  /**
+   * The test that makes the cone real rather than drawn.
+   *
+   * A rangefinder that detects a wall behind it is not a rangefinder, and a picture of a cone over
+   * a model that ignores it would be worse than no picture at all.
+   */
+  const flame = source({ quantity: 'flame', intensity: 1, reachMm: 40, x: 0, y: -50 });
+
+  it('sees a source dead ahead', () => {
+    // Zero degrees is up the workspace, and screen coordinates run down -- so straight ahead of a
+    // sensor at the origin is negative y.
+    expect(withinView(flame, { x: 0, y: 0, facingDeg: 0, fieldOfViewDeg: 60 })).toBe(true);
+  });
+
+  it('does not see one behind it', () => {
+    expect(withinView(flame, { x: 0, y: 0, facingDeg: 180, fieldOfViewDeg: 60 })).toBe(false);
+  });
+
+  it('sees it again once it is turned back', () => {
+    // Ninety degrees off is outside a sixty degree cone and inside a two hundred degree one.
+    expect(withinView(flame, { x: 0, y: 0, facingDeg: 90, fieldOfViewDeg: 60 })).toBe(false);
+    expect(withinView(flame, { x: 0, y: 0, facingDeg: 90, fieldOfViewDeg: 200 })).toBe(true);
+  });
+
+  it('ignores aim entirely when the part has no cone', () => {
+    for (const facingDeg of [0, 90, 180, 270]) {
+      expect(withinView(flame, { x: 0, y: 0, facingDeg })).toBe(true);
+    }
+  });
+
+  it('stops at the stated range', () => {
+    expect(withinView(flame, { x: 0, y: 0, rangeMm: 60 })).toBe(true);
+    expect(withinView(flame, { x: 0, y: 0, rangeMm: 40 })).toBe(false);
+  });
+
+  it('changes what the field delivers, not just what is drawn', () => {
+    const facing = fieldAt([flame], 'flame', 0, 0, 0, { facingDeg: 0, fieldOfViewDeg: 60 });
+    const away = fieldAt([flame], 'flame', 0, 0, 0, { facingDeg: 180, fieldOfViewDeg: 60 });
+    const blind = fieldAt([flame], 'flame', 0, 0, 0);
+
+    // Pointed at it, the cone takes nothing away: the falloff alone decides. Fifty millimetres out
+    // with a forty millimetre half-distance is 0.39, and aiming does not change that.
+    expect(facing).toBeCloseTo(blind, 9);
+    expect(facing).toBeGreaterThan(0.3);
+    // Pointed away, it is not detected at all -- not merely weaker.
+    expect(away).toBe(0);
+  });
+
+  it('gives the built-in sensors the cones their datasheets state', () => {
+    installBuiltinManifests();
+    const cone = (type: string, name: string) =>
+      partDefinition(type).state!.find((v) => v.name === name)!;
+
+    expect(cone('hc-sr04', 'distanceCm').fieldOfViewDeg).toBe(15);
+    expect(cone('hc-sr04', 'distanceCm').rangeCm).toBe(400);
+    expect(cone('hc-sr501', 'motion').fieldOfViewDeg).toBe(110);
+    expect(cone('flame-sensor', 'flame').fieldOfViewDeg).toBe(60);
+    // A thermometer measures the temperature where it is. No cone, no range.
+    expect(cone('tmp36', 'temperatureC').fieldOfViewDeg).toBeUndefined();
+    expect(cone('tmp36', 'temperatureC').rangeCm).toBeUndefined();
   });
 });

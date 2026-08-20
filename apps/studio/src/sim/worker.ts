@@ -20,6 +20,7 @@ import {
   type Fault,
 } from '@robo-journey/sim-core';
 import {
+  CM_PER_CANVAS_MM,
   ManifestDevice,
   buildCircuit,
   fieldAt,
@@ -287,7 +288,18 @@ class Simulation implements SimApi {
             : variable.default;
 
         const value = clamp(
-          fieldAt(sources, variable.quantity, part.x, part.y, ambient),
+          fieldAt(sources, variable.quantity, part.x, part.y, ambient, {
+            // The part's own rotation is where it is pointing. Sources outside the cone or beyond
+            // the range are not detected at all, which is what makes turning a rangefinder away
+            // from a wall do something.
+            facingDeg: part.rotation,
+            ...(variable.fieldOfViewDeg !== undefined
+              ? { fieldOfViewDeg: variable.fieldOfViewDeg }
+              : {}),
+            ...(variable.rangeCm !== undefined
+              ? { rangeMm: variable.rangeCm / CM_PER_CANVAS_MM }
+              : {}),
+          }),
           variable.min,
           variable.max,
         );

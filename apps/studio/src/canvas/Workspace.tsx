@@ -339,7 +339,7 @@ export function Workspace({ width, height, onControls, onPartContextMenu }: Prop
         <GridDots width={width} height={height} view={view} />
         {/* Under the parts, so a coupling line runs behind the things it connects rather than
             across their faces. */}
-        <SensingLayer project={project} driven={snapshot.driven} />
+        <SensingLayer project={project} driven={snapshot.driven} selection={selection} />
         {project.parts.map((part) => {
           const selected = selection === part.id;
           const common = { part, selected };
@@ -408,6 +408,9 @@ export function Workspace({ width, height, onControls, onPartContextMenu }: Prop
               draggable={draggable}
               x={mm(part.x)}
               y={mm(part.y)}
+              // About the part's origin, which is where `terminalPositions` rotates its pins too.
+              // The two agreeing is what keeps a wire attached to a leg after a part is turned.
+              rotation={part.rotation}
               onClick={(e) => {
                 e.cancelBubble = true;
                 setSelection(part.id);

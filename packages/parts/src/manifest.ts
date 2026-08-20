@@ -177,6 +177,25 @@ export const StateVariableSchema = z.object({
       'vibration',
     ])
     .optional(),
+  /**
+   * How far the part can detect this quantity, centimetres.
+   *
+   * A datasheet figure -- four metres for an HC-SR04, seven for a PIR, about one for a flame
+   * sensor. Beyond it a source contributes nothing, which is what makes a rangefinder pointed at a
+   * distant wall report nothing instead of reporting the wall.
+   *
+   * Omitted for anything that measures the condition at its own location rather than detecting
+   * something at a distance: a thermometer has no range, it has a temperature.
+   */
+  rangeCm: z.number().positive().optional(),
+  /**
+   * Width of the detection cone, degrees, centred on the way the part faces.
+   *
+   * Omitted means it does not care -- a thermistor, a magnet sensor, a microphone. Present means
+   * a source outside the cone is not detected at all, which is the difference between a
+   * rangefinder and a proximity field.
+   */
+  fieldOfViewDeg: z.number().positive().max(360).optional(),
 });
 
 // ---------------------------------------------------------------------------------------------

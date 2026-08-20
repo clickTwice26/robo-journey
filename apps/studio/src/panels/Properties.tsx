@@ -14,6 +14,8 @@ import {
   Box,
   Button,
   Divider,
+  IconButton,
+  Tooltip,
   FormControlLabel,
   MenuItem,
   Slider,
@@ -23,6 +25,7 @@ import {
   Typography,
 } from '@mui/material';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlineOutlined';
+import Rotate90DegreesCwIcon from '@mui/icons-material/Rotate90DegreesCw';
 import {
   EMISSIONS,
   partDefinition,
@@ -212,6 +215,7 @@ function Inspector() {
   const project = useStudio((s) => s.project);
   const updatePartProps = useStudio((s) => s.updatePartProps);
   const removePart = useStudio((s) => s.removePart);
+  const rotatePart = useStudio((s) => s.rotatePart);
 
   const part = project.parts.find((p) => p.id === selection);
   if (!part) {
@@ -352,6 +356,25 @@ function Inspector() {
           {part.props.pressed ? 'Pressed' : 'Hold to press'}
         </Button>
       )}
+
+      {/* Rotation is what aims a directional sensor, so it sits with position rather than buried
+          in a menu. Ninety degree steps because that is how parts go onto a bench; the field takes
+          anything for the cases where it does not. */}
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+        <TextField
+          label="Facing (deg)"
+          type="number"
+          value={String(Math.round(part.rotation))}
+          onChange={(e) => rotatePart(part.id, Number(e.target.value) || 0)}
+          helperText="0 points up the workspace"
+          sx={{ flex: 1 }}
+        />
+        <Tooltip title="Turn 90 degrees (R)">
+          <IconButton onClick={() => rotatePart(part.id, part.rotation + 90)}>
+            <Rotate90DegreesCwIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      </Stack>
 
       <Stack direction="row" spacing={1}>
         <TextField

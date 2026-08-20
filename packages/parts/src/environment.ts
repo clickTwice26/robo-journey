@@ -100,6 +100,51 @@ export interface EnvironmentSource {
   readonly active: boolean;
 }
 
+/**
+ * Where a sensor is and which way it is looking.
+ *
+ * `facingDeg` follows the part's rotation, with zero pointing up the workspace -- which is the
+ * direction a module's sensing face points when its header is along the bottom, the orientation
+ * every one of them is drawn in.
+ */
+export interface SensorView {
+  readonly x: number;
+  readonly y: number;
+  /** Degrees clockwise from "up", matching the canvas's own rotation. */
+  readonly facingDeg?: number;
+  /** Cone width in degrees. Omitted means it detects in every direction. */
+  readonly fieldOfViewDeg?: number;
+  /** Detection range in canvas millimetres. Omitted means unbounded. */
+  readonly rangeMm?: number;
+}
+
+/** Smallest angle between two bearings, degrees. */
+function angleBetween(a: number, b: number): number {
+  const difference = Math.abs(((a - b) % 360) + 360) % 360;
+  return difference > 180 ? 360 - difference : difference;
+}
+
+/**
+ * Whether a source is somewhere this sensor can see.
+ *
+ * Range and cone are both hard: a real rangefinder does not half-detect a wall behind it. A source
+ * sitting exactly on the sensor is always visible, since a bearing to yourself is meaningless.
+ */
+export function withinView(source: EnvironmentSource, view: SensorView): boolean {
+  const dx = source.x - view.x;
+  const dy = source.y - view.y;
+  const distance = Math.hypot(dx, dy);
+
+  if (view.rangeMm !== undefined && distance > view.rangeMm) return false;
+  if (view.fieldOfViewDeg === undefined || view.fieldOfViewDeg >= 360) return true;
+  if (distance < 1e-6) return true;
+
+  // Screen coordinates run down the page, so "up" is negative y -- which is why the bearing is
+  // measured from -y rather than from +x.
+  const bearing = (Math.atan2(dx, -dy) * 180) / Math.PI;
+  return angleBetween(bearing, view.facingDeg ?? 0) <= view.fieldOfViewDeg / 2;
+}
+
 /** Distance between two points on the workspace, canvas millimetres. */
 const distanceMm = (ax: number, ay: number, bx: number, by: number): number =>
   Math.hypot(ax - bx, ay - by);
@@ -134,9 +179,14 @@ export function fieldAt(
   x: number,
   y: number,
   ambient: number,
+  /** The sensor's own reach and aim, when it has any. */
+  view?: Omit<SensorView, 'x' | 'y'>,
 ): number {
   const model = MODELS[quantity];
-  const relevant = sources.filter((s) => s.quantity === quantity && s.active);
+  const aim: SensorView = { x, y, ...view };
+  const relevant = sources.filter(
+    (s) => s.quantity === quantity && s.active && withinView(s, aim),
+  );
   if (relevant.length === 0) return ambient;
 
   switch (model.combine) {

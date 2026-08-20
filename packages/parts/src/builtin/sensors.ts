@@ -28,7 +28,18 @@ export const PHOTORESISTOR: ComponentManifest = {
     ],
     5,
   ),
-  state: [{ name: 'lux', label: 'Light', unit: 'lux', min: 0, max: 1000, default: 100, step: 1, quantity: 'light' }],
+  state: [{
+      name: 'lux',
+      label: 'Light',
+      unit: 'lux',
+      min: 0,
+      max: 1000,
+      default: 100,
+      step: 1,
+      quantity: 'light',
+      // A cell in a package only sees what is in front of it. No range: light is what arrives.
+      fieldOfViewDeg: 120,
+    }],
   behavior: {
     kind: 'variable-resistor',
     pinA: 'A',
@@ -168,7 +179,20 @@ export const HC_SR04: ComponentManifest = {
     ],
     17,
   ),
-  state: [{ name: 'distanceCm', label: 'Distance', unit: 'cm', min: 2, max: 400, default: 40, step: 1, quantity: 'distance' }],
+  state: [{
+      name: 'distanceCm',
+      label: 'Distance',
+      unit: 'cm',
+      min: 2,
+      max: 400,
+      default: 40,
+      step: 1,
+      quantity: 'distance',
+      // Four metres and a fifteen degree cone: the figures on the module's own datasheet, and
+      // the reason it misses a wall a foot to one side.
+      rangeCm: 400,
+      fieldOfViewDeg: 15,
+    }],
   behavior: {
     kind: 'pulse-echo',
     triggerPin: 'TRIG',
@@ -204,7 +228,19 @@ export const PIR_HC_SR501: ComponentManifest = {
     ],
     20,
   ),
-  state: [{ name: 'motion', label: 'Movement in view', unit: '', min: 0, max: 1, default: 0, step: 1, quantity: 'motion' }],
+  state: [{
+      name: 'motion',
+      label: 'Movement in view',
+      unit: '',
+      min: 0,
+      max: 1,
+      default: 0,
+      step: 1,
+      quantity: 'motion',
+      rangeCm: 700,
+      // A wide cone, which is why a PIR aimed at a doorway also sees most of the room.
+      fieldOfViewDeg: 110,
+    }],
   behavior: {
     kind: 'threshold-switch',
     outputPin: 'OUT',
@@ -381,7 +417,18 @@ export const FLAME_SENSOR: ComponentManifest = {
     11,
   ),
   state: [
-    { name: 'flame', label: 'Flame', unit: '', min: 0, max: 1, default: 0, step: 0.01, quantity: 'flame' },
+    {
+      name: 'flame',
+      label: 'Flame',
+      unit: '',
+      min: 0,
+      max: 1,
+      default: 0,
+      step: 0.01,
+      quantity: 'flame',
+      rangeCm: 100,
+      fieldOfViewDeg: 60,
+    },
   ],
   behavior: {
     kind: 'analog-sensor',
@@ -426,7 +473,18 @@ export const SOUND_SENSOR: ComponentManifest = {
     11,
   ),
   state: [
-    { name: 'soundDb', label: 'Sound level', unit: 'dB', min: 30, max: 110, default: 40, step: 1, quantity: 'sound' },
+    {
+      name: 'soundDb',
+      label: 'Sound level',
+      unit: 'dB',
+      min: 30,
+      max: 110,
+      default: 40,
+      step: 1,
+      quantity: 'sound',
+      // No cone: an electret capsule is close enough to omnidirectional to model as one.
+      rangeCm: 500,
+    },
   ],
   behavior: {
     kind: 'analog-sensor',

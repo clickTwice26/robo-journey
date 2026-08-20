@@ -82,6 +82,7 @@ interface StudioState {
   canUndo(): boolean;
   canRedo(): boolean;
   addPart(part: PartInstance): void;
+  rotatePart(id: string, degrees: number): void;
   movePart(id: string, x: number, y: number): void;
   /** Move one part to an absolute position and shift others by the same delta, in one update. */
   movePartWithAttached(id: string, x: number, y: number, attached: readonly string[]): void;
@@ -195,6 +196,23 @@ export const useStudio = create<StudioState>((set, get) => ({
 
   addPart: (part) =>
     set((state) => withHistory(state, (p) => ({ ...p, parts: [...p.parts, part] }))),
+
+  /**
+   * Turn a part on the spot.
+   *
+   * Wrapped to 0-359 so the number in the inspector stays readable after a few turns, and about
+   * the part's origin because that is where the canvas and the terminal map both rotate it. Wires
+   * follow because they are drawn from that same map rather than from remembered coordinates.
+   */
+  rotatePart: (id, degrees) =>
+    set((state) =>
+      withHistory(state, (p) => ({
+        ...p,
+        parts: p.parts.map((part) =>
+          part.id === id ? { ...part, rotation: ((degrees % 360) + 360) % 360 } : part,
+        ),
+      })),
+    ),
 
   movePart: (id, x, y) =>
     set((state) =>

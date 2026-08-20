@@ -13,22 +13,25 @@
  * strongly, and no line means nothing is. It cannot flatter the simulation because it *is* the
  * simulation.
  *
- * ## Why there are no cones
+ * ## The cones are the real ones
  *
- * Real sensors are directional -- a rangefinder sees a 15 degree wedge, a PIR about 110 -- and
- * drawing those would look far better than this. But the field model is omnidirectional and parts
- * cannot be rotated yet, so every cone would point the same way and the physics would ignore it: a
- * wall placed inside the wedge and a wall placed behind the sensor would read identically. A
- * picture that disagrees with the simulation is worse than no picture, so the cones arrive with
- * rotation, and not before.
+ * A rangefinder sees about fifteen degrees, a PIR about a hundred and ten, a flame sensor sixty.
+ * Those figures come off the datasheets into the manifest, the field maths refuses any source
+ * outside them, and the wedge drawn here is the same number -- so turning a sensor away from a
+ * flame stops it detecting the flame, and the picture says why.
+ *
+ * Zero degrees points up the workspace, which is the way a module's sensing face looks when its
+ * header is along the bottom -- the orientation every one of them is drawn in.
  */
-import { Circle, Group, Line, Text } from 'react-konva';
+import { Circle, Group, Line, Text, Wedge } from 'react-konva';
 import {
+  CM_PER_CANVAS_MM,
   contributionAt,
   environmentSources,
   partDefinition,
   reachFraction,
   reaches,
+  withinView,
   type EnvironmentSource,
   type Project,
   type Quantity,
@@ -77,6 +80,17 @@ interface Link {
   readonly strength: number;
 }
 
+interface Cone {
+  readonly partId: string;
+  readonly at: { x: number; y: number };
+  readonly facingDeg: number;
+  readonly quantity: Quantity;
+  /** Detection range in canvas millimetres, or null for a sensor with no stated range. */
+  readonly rangeMm: number | null;
+  /** Cone width, or null for one that detects in every direction. */
+  readonly fieldOfViewDeg: number | null;
+}
+
 interface ActiveSensor {
   readonly partId: string;
   readonly at: { x: number; y: number };
@@ -95,11 +109,12 @@ interface ActiveSensor {
 function couple(
   project: Project,
   driven: Record<string, Record<string, number>>,
-): { links: Link[]; sensors: ActiveSensor[] } {
+  selection: string | null,
+): { links: Link[]; sensors: ActiveSensor[]; cones: Cone[] } {
   const sources: EnvironmentSource[] = environmentSources(project);
   const links: Link[] = [];
   const sensors: ActiveSensor[] = [];
-  if (sources.length === 0) return { links, sensors };
+  const cones: Cone[] = [];
 
   for (const part of project.parts) {
     let definition;
@@ -131,6 +146,15 @@ function couple(
     for (const source of sources) {
       if (!quantities.includes(source.quantity)) continue;
       if (!reaches(source, at.x, at.y)) continue;
+      // A source the sensor cannot see gets no line, for the same reason it gets no reading.
+      const variable = variables.find((v) => v.quantity === source.quantity)!;
+      const inView = withinView(source, {
+        ...at,
+        facingDeg: part.rotation,
+        ...(variable.fieldOfViewDeg !== undefined ? { fieldOfViewDeg: variable.fieldOfViewDeg } : {}),
+        ...(variable.rangeCm !== undefined ? { rangeMm: variable.rangeCm / CM_PER_CANVAS_MM } : {}),
+      });
+      if (!inView) continue;
       // `distance` sources always "reach" -- an obstacle is measured, not delivered -- so they get
       // a line only when the sensor is genuinely reading them.
       if (source.quantity === 'distance' && readings.length === 0) continue;
@@ -151,6 +175,24 @@ function couple(
 
     links.push(...mine);
 
+    // What this part can see, drawn when you are looking at it or when it is picking something up.
+    // Both, because they answer different questions: "which way is this pointing" is asked about
+    // one part at a time, and "what is this one reacting to" is asked while it runs. Drawing every
+    // sensor's cone at once would bury the circuit under overlapping wedges.
+    if (selection === part.id || mine.length > 0) {
+      for (const variable of variables) {
+        if (variable.rangeCm === undefined && variable.fieldOfViewDeg === undefined) continue;
+        cones.push({
+          partId: part.id,
+          at,
+          facingDeg: part.rotation,
+          quantity: variable.quantity!,
+          rangeMm: variable.rangeCm === undefined ? null : variable.rangeCm / CM_PER_CANVAS_MM,
+          fieldOfViewDeg: variable.fieldOfViewDeg ?? null,
+        });
+      }
+    }
+
     // Marked only when something is actually reaching it. Keying this off "a source of that kind
     // exists somewhere" would put a halo and a reading on a probe that is picking up nothing --
     // which is precisely the confusion the overlay is here to remove.
@@ -159,21 +201,107 @@ function couple(
     }
   }
 
-  return { links, sensors };
+  return { links, sensors, cones };
+}
+
+/**
+ * The area a sensor covers.
+ *
+ * A wedge when the part has a stated cone, a full circle when it detects in every direction. The
+ * radius is the declared range at the workspace's own scale -- one millimetre to the centimetre --
+ * so a four-metre rangefinder really does cover four hundred millimetres of canvas. That is a lot
+ * of workspace, and it is the truth about what the part can reach.
+ */
+/**
+ * How far a cone is drawn before it stops being useful, canvas millimetres.
+ *
+ * A PIR reaches seven metres, which at this workspace's scale is three and a half thousand pixels
+ * of tinted wedge across everything else on the bench. Drawn in full it is truthful and unusable,
+ * so beyond this the wedge is cut off and the real figure is written at the edge instead -- the
+ * number is still exact, it is just in words rather than in pixels.
+ */
+const MAX_DRAWN_REACH_MM = 90;
+
+/** A range in the unit that reads best, remembering that a canvas millimetre is a centimetre. */
+function formatRange(rangeMm: number): string {
+  const cm = rangeMm * CM_PER_CANVAS_MM;
+  return cm >= 100 ? `${(cm / 100).toFixed(1)} m` : `${cm.toFixed(0)} cm`;
+}
+
+function SensingCone({ cone }: { readonly cone: Cone }) {
+  const color = QUANTITY_COLORS[cone.quantity];
+  // No stated range still gets a shape, sized to say "this way" rather than "this far".
+  const trueReach = cone.rangeMm ?? 45;
+  const clipped = trueReach > MAX_DRAWN_REACH_MM;
+  const radius = mm(Math.min(trueReach, MAX_DRAWN_REACH_MM));
+  const spread = cone.fieldOfViewDeg ?? 360;
+  // Konva measures from the positive x axis and this model measures from "up", so the wedge is
+  // swung back a quarter turn and then half its own width to centre it on the facing.
+  const rotation = cone.facingDeg - 90 - spread / 2;
+
+  return (
+    <Group x={mm(cone.at.x)} y={mm(cone.at.y)} listening={false}>
+      <Wedge radius={radius} angle={spread} rotation={rotation} fill={color} opacity={0.07} />
+      <Wedge
+        radius={radius}
+        angle={spread}
+        rotation={rotation}
+        stroke={color}
+        strokeWidth={1}
+        // A cut-off cone gets a fainter, longer-dashed edge, so it reads as "continues" rather
+        // than as a boundary that is not there.
+        opacity={clipped ? 0.28 : 0.45}
+        dash={clipped ? [3, 7] : [5, 5]}
+      />
+
+      {/* Which way is forward, drawn short so it reads even when the wedge runs off screen. */}
+      <Line
+        points={[0, 0, 0, -mm(9)]}
+        stroke={color}
+        strokeWidth={1.6}
+        opacity={0.85}
+        rotation={cone.facingDeg}
+      />
+
+      {cone.rangeMm !== null && (
+        <Group rotation={cone.facingDeg}>
+          <Text
+            x={-60}
+            y={-radius - (clipped ? 14 : 12)}
+            width={120}
+            align="center"
+            text={clipped ? `${formatRange(trueReach)} →` : formatRange(trueReach)}
+            fontSize={6.5}
+            fontStyle="bold"
+            fill={color}
+            opacity={0.85}
+            // Counter-rotated so the label stays upright whichever way the part is turned.
+            rotation={-cone.facingDeg}
+          />
+        </Group>
+      )}
+    </Group>
+  );
 }
 
 export function SensingLayer({
   project,
   driven,
+  selection,
 }: {
   readonly project: Project;
   readonly driven: Record<string, Record<string, number>>;
+  readonly selection: string | null;
 }) {
-  const { links, sensors } = couple(project, driven);
-  if (links.length === 0 && sensors.length === 0) return null;
+  const { links, sensors, cones } = couple(project, driven, selection);
+  if (links.length === 0 && sensors.length === 0 && cones.length === 0) return null;
 
   return (
     <Group listening={false}>
+      {cones.map((cone) => (
+        <SensingCone key={`${cone.partId}:${cone.quantity}`} cone={cone} />
+      ))}
+
       {links.map((link) => {
         const color = QUANTITY_COLORS[link.quantity];
         return (

@@ -277,6 +277,18 @@ export function MenuBar({
           event.preventDefault();
           useStudio.getState().canvasControls?.fit();
         }
+        // Every canvas tool turns the selection with R, and there is nothing else it could mean
+        // while the workspace has focus.
+        if (event.key.toLowerCase() === 'r') {
+          const store = useStudio.getState();
+          const selected = store.selection;
+          if (!selected) return;
+          const part = store.project.parts.find((p) => p.id === selected);
+          if (!part) return;
+          event.preventDefault();
+          // Shift turns the other way, which is what saves three presses to undo one.
+          store.rotatePart(selected, part.rotation + (event.shiftKey ? -90 : 90));
+        }
         return;
       }
       if (!mod) return;
@@ -499,7 +511,7 @@ export function MenuBar({
             label: 'Keyboard shortcuts',
             secondary:
               `${shortcut('↵')} build & run · ${shortcut('B')} compile · ${shortcut('S')} save · ` +
-              `${shortcut('O')} open · ${shortcut('Z')} undo · 1 fit to view · Del remove`,
+              `${shortcut('O')} open · ${shortcut('Z')} undo · 1 fit · R rotate · Del remove`,
             onClick: close,
           },
         ],
