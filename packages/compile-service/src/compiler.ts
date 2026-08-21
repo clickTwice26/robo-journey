@@ -44,31 +44,68 @@ export interface CompileResult {
 export class CompileError extends Error {}
 
 /**
+ * The three ways the toolchain can be missing, which need three different things done about them.
+ *
+ * Lumping them together is how somebody ends up reading "start Docker Desktop" while Docker is
+ * running perfectly well and the real answer is that an image has never been built here.
+ */
+export type ToolchainProblem = 'daemon' | 'image' | 'binary';
+
+const REMEDIES: Record<ToolchainProblem, string> = {
+  daemon: 'Docker does not appear to be running -- start Docker Desktop and try again.',
+  // The image is built locally and never pulled: it is not on any registry, so a fresh checkout
+  // has no way to obtain it and `docker run` reports it as an access-denied pull.
+  image:
+    'The arduino-cli image has not been built on this machine yet. It is built locally rather ' +
+    'than pulled, so a fresh checkout does not have one:\n\n    npm run image:build\n\n' +
+    'That takes a few minutes the first time. Afterwards compiling is offline and repeatable.',
+  binary: 'Docker is not installed, or not on this process\'s PATH. See https://docs.docker.com/engine/install/',
+};
+
+/**
  * The toolchain itself is unavailable, as distinct from the sketch failing to compile.
  *
  * Worth its own type because the remedy is completely different: a compile error means fix your
- * code, this means start Docker. Reporting the raw daemon error as a sketch diagnostic -- which is
- * what happened the first time this occurred -- puts an unactionable message on line 1 of a file
- * that is perfectly fine.
+ * code, this means fix your machine. Reporting the raw daemon error as a sketch diagnostic --
+ * which is what happened the first time this occurred -- puts an unactionable message on line 1 of
+ * a file that is perfectly fine.
  */
 export class ToolchainUnavailableError extends CompileError {
-  constructor(detail: string) {
-    super(
-      'The compile toolchain is unavailable. Docker does not appear to be running -- start ' +
-        `Docker Desktop and try again.\n\nDetail: ${detail}`,
-    );
+  readonly problem: ToolchainProblem;
+
+  constructor(problem: ToolchainProblem, detail: string) {
+    super(`The compile toolchain is unavailable. ${REMEDIES[problem]}\n\nDetail: ${detail}`);
     this.name = 'ToolchainUnavailableError';
+    this.problem = problem;
   }
 }
 
-/** Signatures of a Docker daemon that is not reachable, as opposed to a build that failed. */
-function looksLikeDockerDown(stderr: string): boolean {
-  return (
+/**
+ * Which toolchain problem this stderr describes, or null if it is a real build failure.
+ *
+ * The image case is checked on its own signatures rather than on the exit code, because docker
+ * exits 125 for everything it decides before the container starts.
+ */
+export function toolchainProblem(stderr: string): ToolchainProblem | null {
+  if (
     /cannot connect to the docker daemon/i.test(stderr) ||
     /failed to connect to the docker API/i.test(stderr) ||
-    /is the docker daemon running/i.test(stderr) ||
-    /docker: command not found/i.test(stderr)
-  );
+    /is the docker daemon running/i.test(stderr)
+  ) {
+    return 'daemon';
+  }
+  if (/docker: command not found/i.test(stderr) || /executable file not found/i.test(stderr)) {
+    return 'binary';
+  }
+  if (
+    /unable to find image/i.test(stderr) ||
+    /pull access denied/i.test(stderr) ||
+    /repository does not exist/i.test(stderr) ||
+    /manifest .* not found/i.test(stderr)
+  ) {
+    return 'image';
+  }
+  return null;
 }
 
 /** Stable hash over the sketch sources plus the target board. */
@@ -102,7 +139,7 @@ function run(command: string, args: readonly string[]): Promise<ProcessResult> {
     // toolchain problem rather than a build failure.
     child.on('error', (error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') {
-        reject(new ToolchainUnavailableError(`\`${command}\` is not installed or not on PATH`));
+        reject(new ToolchainUnavailableError('binary', `\`${command}\` is not installed or not on PATH`));
         return;
       }
       reject(error);
@@ -184,9 +221,10 @@ export class ArduinoCompiler {
       if (result.code !== 0 || hasErrors(diagnostics)) {
         if (result.code !== 0 && diagnostics.length === 0) {
           // No parseable diagnostics and a non-zero exit means the tool itself failed, not the
-          // sketch. Separate the "Docker is down" case so the user is told what to actually do.
-          if (looksLikeDockerDown(result.stderr)) {
-            throw new ToolchainUnavailableError(result.stderr.trim().split('\n')[0] ?? '');
+          // sketch. Separate out the toolchain cases so the user is told what to actually do.
+          const problem = toolchainProblem(result.stderr);
+          if (problem) {
+            throw new ToolchainUnavailableError(problem, result.stderr.trim().split('\n')[0] ?? '');
           }
           throw new CompileError(
             `arduino-cli exited ${result.code} without diagnostics:\n${result.stderr.trim()}`,

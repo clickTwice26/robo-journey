@@ -63,9 +63,14 @@ testing cheap and makes the eventual Tauri port a packaging step rather than a r
 Requires Node 20+ and Docker.
 
 ```bash
-cp .env.example .env   # set POSTGRES_PASSWORD
+cp .env.example .env    # set POSTGRES_PASSWORD
+npm run image:build     # the arduino-cli image, built here rather than pulled
 docker compose up --build
 ```
+
+`image:build` is a one-off that takes a few minutes. The compiler image is built locally and is on
+no registry, so a fresh checkout has no way to fetch it -- and without it the first Build & Run
+reports the build system as unavailable.
 
 Then open http://localhost:28610, create an account, pick **Examples → Blink an LED**, and press
 **Build & Run**. The service serves the studio and the API from one origin, so there is no proxy to

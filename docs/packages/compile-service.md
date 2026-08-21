@@ -45,6 +45,13 @@ load balancer should watch, and the one `install.sh` polls.
 There is no browser-side AVR compiler. avr-gcc has no mature WASM port, so compilation runs
 `arduino-cli` in a container with the same interface either way.
 
+**The image is built, never pulled.** `npm run image:build` bakes arduino-cli and the AVR core into
+`robo-journey/arduino-cli:latest`, which is on no registry. Baking the core in is what makes
+compilation hermetic and offline -- the same image produces the same `.hex` forever, which is what
+makes the golden-firmware tests mean anything, and it is the binary the desktop build will bundle.
+The cost is that a fresh checkout has to build it once; until it does, `/compile` answers **503**
+with the command to run.
+
 ```mermaid
 flowchart LR
   req["POST /compile"] --> seat{"has a seat?"}

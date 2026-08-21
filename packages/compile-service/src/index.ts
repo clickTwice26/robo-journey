@@ -8,6 +8,7 @@ export {
   ArduinoCompiler,
   CompileError,
   ToolchainUnavailableError,
+  toolchainProblem,
   DEFAULT_FQBN,
   DEFAULT_IMAGE,
   hashRequest,
