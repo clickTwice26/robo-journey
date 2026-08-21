@@ -38,6 +38,7 @@ import { CloudProjectsDialog } from './panels/CloudProjectsDialog.tsx';
 import { LibraryDialog } from './panels/LibraryDialog.tsx';
 import { HelpDialog, type HelpTopic } from './panels/HelpDialog.tsx';
 import { InviteDialog } from './panels/InviteDialog.tsx';
+import { UpgradeDialog } from './panels/UpgradeDialog.tsx';
 import { useBuzzerAudio } from './sim/useAudio.ts';
 import type { ThemeControl } from './useThemeMode.ts';
 import { restoreLibrary } from './library.ts';
@@ -96,6 +97,7 @@ export function Studio({ gate, theme }: { gate: Gate; theme: ThemeControl }) {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [helpTopic, setHelpTopic] = useState<HelpTopic | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   // Buzzers, out loud. The pitch and loudness come from the worker's measurement of the actual
   // drive waveform, so this plays what the circuit is doing rather than a sound effect.
@@ -334,6 +336,7 @@ export function Studio({ gate, theme }: { gate: Gate; theme: ThemeControl }) {
           }}
           onOpenHelp={setHelpTopic}
           onOpenInvite={() => setInviteOpen(true)}
+          onOpenUpgrade={() => setUpgradeOpen(true)}
         />
         <Box sx={{ flex: 1, minHeight: 0 }}>
           <DockviewReact components={components} onReady={onReady} className="dockview-theme-abyss" />
@@ -356,6 +359,7 @@ export function Studio({ gate, theme }: { gate: Gate; theme: ThemeControl }) {
       />
       <HelpDialog topic={helpTopic} onClose={() => setHelpTopic(null)} />
       <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} />
+      <UpgradeDialog open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
     </>
   );
 }

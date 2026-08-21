@@ -42,6 +42,7 @@ import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
 import KeyboardIcon from '@mui/icons-material/Keyboard';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
+import UpgradeIcon from '@mui/icons-material/Upgrade';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import PauseIcon from '@mui/icons-material/Pause';
@@ -135,6 +136,7 @@ interface Props {
   onOpenLibrary(groupId?: string): void;
   onOpenHelp(topic: HelpTopic): void;
   onOpenInvite(): void;
+  onOpenUpgrade(): void;
   theme: ThemeControl;
   /** The seat this session is running on, for the countdown and for signing out. */
   gate: AccessGate;
@@ -148,6 +150,7 @@ export function MenuBar({
   onOpenLibrary,
   onOpenHelp,
   onOpenInvite,
+  onOpenUpgrade,
   theme,
   gate,
 }: Props) {
@@ -552,6 +555,7 @@ export function MenuBar({
     [
       actions, build, buildAndRun, cloudProjectId, close, future.length, hex,
       canvasControls, newProject, onOpenCloudProjects, onOpenDatasheet, onOpenHelp, onOpenInvite,
+      onOpenUpgrade,
       onOpenLibrary,
       past.length, save,
       saveToAccount, selection, signOut, sim, snapshot.running, theme, unplugSelection, user,
@@ -690,6 +694,15 @@ export function MenuBar({
             Invite &amp; earn
           </Button>
         )}
+
+        <Button
+          size="small"
+          startIcon={<UpgradeIcon sx={{ fontSize: 16 }} />}
+          onClick={onOpenUpgrade}
+          sx={{ ml: 0.5, textTransform: 'none' }}
+        >
+          Upgrade
+        </Button>
 
         {/*
           The signed-in account, at the far right. Right-aligned dropdown so it
