@@ -35,6 +35,7 @@ import {
   type PartInstance,
 } from '@robo-journey/parts';
 import { useStudio } from '../store.ts';
+import { PartPortrait } from './PartPortrait.tsx';
 
 export function PropertiesPanel() {
   const selection = useStudio((s) => s.selection);
@@ -244,6 +245,10 @@ function Inspector() {
       <Typography variant="overline" color="text.secondary">
         {definition?.label ?? part.type} · {part.id}
       </Typography>
+
+      {/* What it looks like in the hand, which is the one thing the canvas cannot show: the canvas
+          draws a footprint to scale, and a footprint is not what you recognise in a drawer. */}
+      {definition && <PartPortrait definition={definition} props={part.props} />}
 
       {part.type === 'resistor' && (
         <TextField

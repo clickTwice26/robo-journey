@@ -508,6 +508,7 @@ export function manifestToPartDefinition(
     appearance: {
       bodyColor: manifest.package.bodyColor,
       title: manifest.partNumber || manifest.name,
+      packageType: manifest.package.type,
       ...(manifest.package.type ? { subtitle: manifest.package.type } : {}),
       generated: manifest.provenance.source === 'datasheet-ai',
     },

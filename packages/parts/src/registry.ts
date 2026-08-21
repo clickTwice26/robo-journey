@@ -98,6 +98,14 @@ export interface PartAppearance {
   readonly subtitle?: string;
   /** Marks it as extracted rather than built in. */
   readonly generated?: boolean;
+  /**
+   * The physical package: TO-92, TO-220, DIP-8, radial, module.
+   *
+   * Carried so the properties panel can draw the part as it actually looks when there is no
+   * photograph of it. Parts share packages -- seven of these are TO-92 -- so one drawing per
+   * package covers the library without one drawing per part.
+   */
+  readonly packageType?: string;
 }
 
 export interface PartDefinition {

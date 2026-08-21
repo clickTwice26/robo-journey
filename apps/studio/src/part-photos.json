@@ -1,0 +1,250 @@
+{
+  "resistor": {
+    "file": "/parts/resistor.jpg",
+    "title": "Kohleschichtwiderstand 47KOhm, 10% Toleranz, 0,5W.png",
+    "artist": "YoktoBit",
+    "licence": "CC BY-SA 4.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Kohleschichtwiderstand_47KOhm,_10%25_Toleranz,_0,5W.png"
+  },
+  "led": {
+    "file": "/parts/led.jpg",
+    "title": "LED - 5mm Green.jpg",
+    "artist": "Mister rf",
+    "licence": "CC BY-SA 4.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:LED_-_5mm_Green.jpg"
+  },
+  "rgb-led": {
+    "file": "/parts/rgb-led.jpg",
+    "title": "RGB LED 5mm.jpg",
+    "artist": "Mister rf",
+    "licence": "CC BY-SA 4.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:RGB_LED_5mm.jpg"
+  },
+  "photoresistor": {
+    "file": "/parts/photoresistor.jpg",
+    "title": "25mm light-dependent resistor (LDR) (1).jpg",
+    "artist": "Suyash Dwivedi",
+    "licence": "CC BY-SA 4.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:25mm_light-dependent_resistor_(LDR)_(1).jpg"
+  },
+  "thermistor-10k": {
+    "file": "/parts/thermistor-10k.jpg",
+    "title": "NTC Thermistor.jpg",
+    "artist": "Soumyapatra13",
+    "licence": "CC BY-SA 4.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:NTC_Thermistor.jpg"
+  },
+  "cap-100nf": {
+    "file": "/parts/cap-100nf.jpg",
+    "title": "Soviet ceramic disc capacitors 01.jpg",
+    "artist": "Retired electrician",
+    "licence": "CC0",
+    "licenceUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "source": "https://commons.wikimedia.org/wiki/File:Soviet_ceramic_disc_capacitors_01.jpg"
+  },
+  "cap-100uf": {
+    "file": "/parts/cap-100uf.jpg",
+    "title": "Electrolytic capacitors-P1090328.JPG",
+    "artist": "Elcap",
+    "licence": "CC0",
+    "licenceUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "source": "https://commons.wikimedia.org/wiki/File:Electrolytic_capacitors-P1090328.JPG"
+  },
+  "potentiometer-10k": {
+    "file": "/parts/potentiometer-10k.jpg",
+    "title": "12 board mounted potentiometers.jpg",
+    "artist": "Junkyardsparkle",
+    "licence": "CC0",
+    "licenceUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "source": "https://commons.wikimedia.org/wiki/File:12_board_mounted_potentiometers.jpg"
+  },
+  "2n2222": {
+    "file": "/parts/2n2222.jpg",
+    "title": "2N2222.jpg",
+    "artist": "Mister rf",
+    "licence": "CC BY-SA 4.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:2N2222.jpg"
+  },
+  "bc547": {
+    "file": "/parts/bc547.jpg",
+    "title": "BC547 Transistor - 01.jpg",
+    "artist": "Suyash Dwivedi",
+    "licence": "CC BY-SA 4.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:BC547_Transistor_-_01.jpg"
+  },
+  "2n3904": {
+    "file": "/parts/2n3904.jpg",
+    "title": "2N3904 NPN Transistor.jpg",
+    "artist": "WaxPhilosophic",
+    "licence": "CC BY-SA 4.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:2N3904_NPN_Transistor.jpg"
+  },
+  "irlz44n": {
+    "file": "/parts/irlz44n.jpg",
+    "title": "IRFI9540 MOS transistor 01.jpg",
+    "artist": "Retired electrician",
+    "licence": "CC0",
+    "licenceUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "source": "https://commons.wikimedia.org/wiki/File:IRFI9540_MOS_transistor_01.jpg"
+  },
+  "1n4148": {
+    "file": "/parts/1n4148.jpg",
+    "title": "Diode 1n4148.jpg",
+    "artist": "Vonvon",
+    "licence": "CC BY-SA 3.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Diode_1n4148.jpg"
+  },
+  "1n4007": {
+    "file": "/parts/1n4007.jpg",
+    "title": "1N4007 Diode 1480378 79 80 HDR Enhancer cr.jpg",
+    "artist": "Nevit Dilmen (talk)",
+    "licence": "CC BY-SA 3.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:1N4007_Diode_1480378_79_80_HDR_Enhancer_cr.jpg"
+  },
+  "lm7805": {
+    "file": "/parts/lm7805.jpg",
+    "title": "Philips HD8823 - board 1 - STMicroelectronics L7805CV-4706.jpg",
+    "artist": "Raimond Spekking",
+    "licence": "CC BY-SA 4.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Philips_HD8823_-_board_1_-_STMicroelectronics_L7805CV-4706.jpg"
+  },
+  "sn74hc595": {
+    "file": "/parts/sn74hc595.jpg",
+    "title": "74HC595 DIP.jpg",
+    "artist": "oomlout",
+    "licence": "CC BY-SA 2.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/2.0",
+    "source": "https://commons.wikimedia.org/wiki/File:74HC595_DIP.jpg"
+  },
+  "seven-segment": {
+    "file": "/parts/seven-segment.jpg",
+    "title": "FND500.jpg",
+    "artist": "Mister rf",
+    "licence": "CC BY-SA 4.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:FND500.jpg"
+  },
+  "hc-sr04": {
+    "file": "/parts/hc-sr04.jpg",
+    "title": "SparkFun HC-SR04 Ultrasonic-Sensor 13959-01a.jpg",
+    "artist": "SparkFun",
+    "licence": "CC BY 2.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by/2.0",
+    "source": "https://commons.wikimedia.org/wiki/File:SparkFun_HC-SR04_Ultrasonic-Sensor_13959-01a.jpg"
+  },
+  "sg90": {
+    "file": "/parts/sg90.jpg",
+    "title": "Tower Pro SG90 micro servo motor.jpg",
+    "artist": "Suyash Dwivedi",
+    "licence": "CC BY-SA 4.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Tower_Pro_SG90_micro_servo_motor.jpg"
+  },
+  "buzzer-active": {
+    "file": "/parts/buzzer-active.jpg",
+    "title": "Electronic component piezo.jpg",
+    "artist": "me",
+    "licence": "CC BY-SA 3.0",
+    "licenceUrl": "http://creativecommons.org/licenses/by-sa/3.0/",
+    "source": "https://commons.wikimedia.org/wiki/File:Electronic_component_piezo.jpg"
+  },
+  "dc-motor": {
+    "file": "/parts/dc-motor.jpg",
+    "title": "Motors01CJC.jpg",
+    "artist": "en:User:C_J_Cowie",
+    "licence": "CC BY-SA 3.0",
+    "licenceUrl": "http://creativecommons.org/licenses/by-sa/3.0/",
+    "source": "https://commons.wikimedia.org/wiki/File:Motors01CJC.jpg"
+  },
+  "mpu6050": {
+    "file": "/parts/mpu6050.jpg",
+    "title": "GY-521 MPU-6050 Module 3 Axis Gyroscope + Accelerometer 0487.jpg",
+    "artist": "Nevit Dilmen (talk)",
+    "licence": "CC BY-SA 3.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:GY-521_MPU-6050_Module_3_Axis_Gyroscope_%2B_Accelerometer_0487.jpg"
+  },
+  "ds3231": {
+    "file": "/parts/ds3231.jpg",
+    "title": "DS3231 based RTC module.jpg",
+    "artist": "Suyash.dwivedi",
+    "licence": "CC BY-SA 4.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:DS3231_based_RTC_module.jpg"
+  },
+  "reed-switch": {
+    "file": "/parts/reed-switch.jpg",
+    "title": "Interrupteur reed.jpg",
+    "artist": "Timothée Cognard",
+    "licence": "CC BY-SA 4.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Interrupteur_reed.jpg"
+  },
+  "soil-moisture": {
+    "file": "/parts/soil-moisture.jpg",
+    "title": "Soil moisture sensor.JPG",
+    "artist": "Sealman",
+    "licence": "CC BY-SA 4.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Soil_moisture_sensor.JPG"
+  },
+  "tmp36": {
+    "file": "/parts/tmp36.jpg",
+    "title": "Temperature Sensor (TMP36).jpg",
+    "artist": "oomlout",
+    "licence": "CC BY-SA 2.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/2.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Temperature_Sensor_(TMP36).jpg"
+  },
+  "lm35": {
+    "file": "/parts/lm35.jpg",
+    "title": "LM35 temperature sensor semiconductor thermometer 1480374 5 6 HDR enhancer.jpg",
+    "artist": "Nevit Dilmen (talk)",
+    "licence": "CC BY-SA 3.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:LM35_temperature_sensor_semiconductor_thermometer_1480374_5_6_HDR_enhancer.jpg"
+  },
+  "battery-9v": {
+    "file": "/parts/battery-9v.jpg",
+    "title": "Duracell 9 Volt 0849.jpg",
+    "artist": "Ashley Pomeroy",
+    "licence": "CC BY 3.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by/3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Duracell_9_Volt_0849.jpg"
+  },
+  "battery-aa-4": {
+    "file": "/parts/battery-aa-4.jpg",
+    "title": "Energizer NiMH rechargeable AA batteries (four) (vertical).jpg",
+    "artist": "Multicherry",
+    "licence": "CC BY-SA 4.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Energizer_NiMH_rechargeable_AA_batteries_(four)_(vertical).jpg"
+  },
+  "lipo-1s": {
+    "file": "/parts/lipo-1s.jpg",
+    "title": "Lithium polymer battery (11.1 volts).jpg",
+    "artist": "Achimd",
+    "licence": "Public domain",
+    "licenceUrl": null,
+    "source": "https://commons.wikimedia.org/wiki/File:Lithium_polymer_battery_(11.1_volts).jpg"
+  },
+  "usb-5v": {
+    "file": "/parts/usb-5v.jpg",
+    "title": "Phone charger 2026.jpg",
+    "artist": "Сергей Михель",
+    "licence": "CC BY-SA 3.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-sa/3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Phone_charger_2026.jpg"
+  }
+}
