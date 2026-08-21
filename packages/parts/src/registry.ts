@@ -25,7 +25,7 @@ import {
 } from '@robo-journey/sim-core';
 import { INSTRUMENTS } from './instruments.js';
 import { STIMULI } from './stimulus.js';
-import type { StateVariable } from './manifest.js';
+import type { Limits, StateVariable } from './manifest.js';
 
 /** Standard breadboard and header pitch: 0.1 inch. */
 export const PITCH_MM = 2.54;
@@ -151,6 +151,33 @@ export interface PartDefinition {
   build?(ctx: BuildContext): void;
   /** Present on parts without bespoke artwork, telling the canvas how to draw a generic body. */
   readonly appearance?: PartAppearance;
+  /**
+   * What the datasheet says about the part, for the UI to show and the simulation to ignore.
+   *
+   * Copied onto the definition rather than looked up from the manifest for the same reason `state`
+   * is: the palette, the canvas and the inspector all want it, and none of them should have to
+   * keep a second registry of manifests in step with this one.
+   */
+  readonly spec?: PartSpec;
+}
+
+/**
+ * The facts a person wants before they reach for a part: what it is, who makes it, what it is
+ * called on the reel, and what will kill it.
+ */
+export interface PartSpec {
+  readonly description?: string;
+  readonly manufacturer?: string;
+  readonly partNumber?: string;
+  readonly limits?: Limits;
+  /**
+   * What this model of the part does not capture, in the manifest's own words.
+   *
+   * The most useful thing to know before wiring something up, and the reason it is worth carrying
+   * a field for: a part that says it approximates the output is honest in a way that a part which
+   * silently approximates it is not.
+   */
+  readonly notes?: readonly string[];
 }
 
 // ---------------------------------------------------------------------------------------------

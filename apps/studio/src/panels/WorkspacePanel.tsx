@@ -15,6 +15,7 @@ import {
   Menu,
   MenuItem,
   Paper,
+  Popper,
   Stack,
   Tooltip,
 } from '@mui/material';
@@ -25,7 +26,9 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlineOutlined';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import Rotate90DegreesCwIcon from '@mui/icons-material/Rotate90DegreesCw';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { partDefinition } from '@robo-journey/parts';
 import { Workspace, type CanvasControls } from '../canvas/Workspace.tsx';
+import { PartCard } from './PartCard.tsx';
 import { useStudio } from '../store.ts';
 
 export function WorkspacePanel() {
@@ -33,7 +36,11 @@ export function WorkspacePanel() {
   const [size, setSize] = useState({ width: 0, height: 0 });
   const controlsRef = useRef<CanvasControls | null>(null);
   const [menu, setMenu] = useState<{ partId: string; x: number; y: number } | null>(null);
+  const [hover, setHover] = useState<{ partId: string; x: number; y: number } | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const removePart = useStudio((s) => s.removePart);
+  const project = useStudio((s) => s.project);
+  const mode = useStudio((s) => s.mode);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -63,6 +70,42 @@ export function WorkspacePanel() {
     [],
   );
 
+  /**
+   * Wait before showing the card.
+   *
+   * Dragging a wire across a crowded board crosses half a dozen parts on the way, and a card
+   * appearing under each one turns the canvas into a flicker. A pause means you get a card where
+   * you stopped to look, which is the only place you wanted one.
+   */
+  const handleHover = useCallback((event: { partId: string; x: number; y: number } | null) => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    if (!event) {
+      setHover(null);
+      return;
+    }
+    hoverTimer.current = setTimeout(() => setHover(event), 420);
+  }, []);
+
+  useEffect(() => () => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+  }, []);
+
+  // Mid-placement and mid-wire the pointer is a tool, not a cursor: a card under it would cover
+  // the holes being aimed at. The context menu takes precedence for the same reason.
+  const hoveredPart =
+    hover && menu === null && mode.kind === 'select'
+      ? project.parts.find((p) => p.id === hover.partId)
+      : undefined;
+
+  const hoveredDefinition = (() => {
+    if (!hoveredPart) return null;
+    try {
+      return partDefinition(hoveredPart.type);
+    } catch {
+      return null;
+    }
+  })();
+
   /** A quarter turn on the spot. Wires follow, because they are drawn from the terminal map. */
   const rotate = useCallback((partId: string) => {
     const state = useStudio.getState();
@@ -88,8 +131,40 @@ export function WorkspacePanel() {
           height={size.height}
           onControls={handleControls}
           onPartContextMenu={handleContextMenu}
+          onPartHover={handleHover}
         />
       )}
+
+      {/* Anchored to the pointer through a virtual element, because the thing being described is
+          a shape inside a canvas and has no DOM node to hang off. */}
+      <Popper
+        open={hoveredDefinition !== null}
+        anchorEl={
+          hover
+            ? {
+                getBoundingClientRect: () =>
+                  new DOMRect(hover.x, hover.y, 0, 0),
+              }
+            : null
+        }
+        placement="right-start"
+        modifiers={[
+          { name: 'offset', options: { offset: [12, 16] } },
+          { name: 'preventOverflow', options: { padding: 8 } },
+          { name: 'flip', options: { padding: 8 } },
+        ]}
+        sx={{ zIndex: (theme) => theme.zIndex.tooltip, pointerEvents: 'none' }}
+      >
+        {hoveredDefinition && hoveredPart && (
+          <Paper elevation={8} sx={{ borderRadius: 2, border: 1, borderColor: 'divider' }}>
+            <PartCard
+              definition={hoveredDefinition}
+              props={hoveredPart.props}
+              instanceId={hoveredPart.id}
+            />
+          </Paper>
+        )}
+      </Popper>
 
       <Menu
         open={menu !== null}

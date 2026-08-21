@@ -29,6 +29,7 @@ export type {
   PartCategory,
   PartDefinition,
   PartPin,
+  PartSpec,
 } from './registry.js';
 
 export {

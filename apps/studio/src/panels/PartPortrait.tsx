@@ -243,7 +243,11 @@ export function PartPortrait({
             component="img"
             src={credit.file}
             alt={`${definition.label} — ${credit.title}`}
-            loading="lazy"
+            // Eager, not lazy. The element only exists once something is showing it, so deferring
+            // buys nothing -- and on the hover card, which is on screen for about a second, a
+            // deferred image is an empty grey box for the whole time anyone looks at it.
+            loading="eager"
+            decoding="async"
             sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
           />
         ) : (

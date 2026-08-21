@@ -15,6 +15,8 @@ import {
   Button,
   Collapse,
   InputAdornment,
+  Paper,
+  Popper,
   Stack,
   TextField,
   Typography,
@@ -23,10 +25,11 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import SearchIcon from '@mui/icons-material/Search';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { allParts, type PartDefinition } from '@robo-journey/parts';
 import { useStudio } from '../store.ts';
 import { DatasheetDialog } from './DatasheetDialog.tsx';
+import { PartCard } from './PartCard.tsx';
 import type { SimulationController } from '../sim/useSimulation.ts';
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -61,6 +64,22 @@ export function PalettePanel({ sim }: { sim: SimulationController }) {
   });
   // Bumping this re-reads the registry after a component is added at run time.
   const [generation, setGeneration] = useState(0);
+  // What the pointer is over, and the button it is over. Held together so the card cannot end up
+  // anchored to one part while describing another.
+  const [hover, setHover] = useState<{ part: PartDefinition; anchor: HTMLElement } | null>(null);
+  // A card that appears the instant the pointer crosses a button makes scrolling the list feel
+  // like being shouted at. A short wait means you get one only where you stopped.
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const openCard = useCallback((part: PartDefinition, anchor: HTMLElement) => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setHover({ part, anchor }), 320);
+  }, []);
+
+  const closeCard = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    setHover(null);
+  }, []);
 
   const needle = query.trim().toLowerCase();
   const byCategory = useMemo(() => {
@@ -160,7 +179,12 @@ export function PalettePanel({ sim }: { sim: SimulationController }) {
                     variant={
                       mode.kind === 'place' && mode.partType === part.type ? 'contained' : 'outlined'
                     }
-                    onClick={() => setMode({ kind: 'place', partType: part.type })}
+                    onClick={() => {
+                      closeCard();
+                      setMode({ kind: 'place', partType: part.type });
+                    }}
+                    onMouseEnter={(e) => openCard(part, e.currentTarget)}
+                    onMouseLeave={closeCard}
                     sx={{ justifyContent: 'flex-start', textAlign: 'left' }}
                     // Generated parts are marked in the palette itself, not only in the dialog that
                     // made them -- otherwise the distinction disappears the moment it matters. The
@@ -181,6 +205,27 @@ export function PalettePanel({ sim }: { sim: SimulationController }) {
         );
       })}
 
+      {/* Outside the scrolling list and pointer-transparent: the card is something to read, not
+          something to reach, and a card that can be hovered would flicker against the button that
+          opened it. */}
+      <Popper
+        open={hover !== null}
+        anchorEl={hover?.anchor ?? null}
+        placement="right-start"
+        // The palette is docked hard against the left edge, so a card that cannot flip has
+        // nowhere to go; letting it slide keeps it on screen for the parts near the bottom.
+        modifiers={[
+          { name: 'offset', options: { offset: [0, 8] } },
+          { name: 'preventOverflow', options: { padding: 8 } },
+        ]}
+        sx={{ zIndex: (theme) => theme.zIndex.tooltip, pointerEvents: 'none' }}
+      >
+        {hover && (
+          <Paper elevation={8} sx={{ borderRadius: 2, border: 1, borderColor: 'divider' }}>
+            <PartCard definition={hover.part} />
+          </Paper>
+        )}
+      </Popper>
     </Box>
   );
 }

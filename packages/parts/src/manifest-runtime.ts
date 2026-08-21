@@ -505,6 +505,15 @@ export function manifestToPartDefinition(
     height: layout.height,
     pins,
     defaults,
+    spec: {
+      ...(manifest.description ? { description: manifest.description } : {}),
+      ...(manifest.manufacturer ? { manufacturer: manifest.manufacturer } : {}),
+      ...(manifest.partNumber ? { partNumber: manifest.partNumber } : {}),
+      limits: manifest.limits,
+      ...(manifest.provenance.unresolved.length > 0
+        ? { notes: manifest.provenance.unresolved }
+        : {}),
+    },
     appearance: {
       bodyColor: manifest.package.bodyColor,
       title: manifest.partNumber || manifest.name,
