@@ -24,7 +24,7 @@ import type { Pool, PoolClient } from 'pg';
 import { withTransaction } from './db.js';
 
 /** What a credit movement was for. Open-ended: agents and whatever follows use the same ledger. */
-export type CreditFeature = 'chat' | 'datasheet' | 'agent' | 'signup' | 'admin';
+export type CreditFeature = 'chat' | 'datasheet' | 'agent' | 'signup' | 'invite' | 'admin';
 
 export type CreditEntryKind = 'grant' | 'hold' | 'settle' | 'release' | 'adjustment';
 

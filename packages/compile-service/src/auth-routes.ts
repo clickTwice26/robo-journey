@@ -72,6 +72,7 @@ function documentTooLarge(document: unknown): boolean {
 }
 
 interface Credentials {
+  inviteCode?: string;
   email?: string;
   password?: string;
   displayName?: string;
@@ -238,7 +239,7 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
         .send({ error: `Too many sign-ups from here. Try again in ${limit.retryAfter}s.` });
     }
 
-    const { email, password, displayName } = request.body ?? {};
+    const { email, password, displayName, inviteCode } = request.body ?? {};
     if (!email || !password) {
       return reply.status(400).send({ error: 'Email and password are required.' });
     }
@@ -247,6 +248,12 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
       const user = await store.register(email, password, displayName ?? '');
       const session = await store.createSession(user.id);
       setSessionCookie(request, reply, session.token);
+
+      // A bad code must not cost somebody their sign-up. The account is made either way and the
+      // code can be entered again from inside the app.
+      if (inviteCode?.trim()) {
+        await store.invites.redeem(inviteCode, user.id).catch(() => undefined);
+      }
 
       const mailSent = requireVerifiedEmail ? await sendLink(user.id, user.email, 'verify') : true;
       // Nothing to confirm when confirmation is switched off, so the allowance is due now.
@@ -333,6 +340,13 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
       const { userId } = await consumeEmailToken(pool, token, 'verify');
       await store.markEmailVerified(userId);
       await grantSignupCredits(userId);
+      // Whoever invited them gets paid now rather than at signup, for the same reason the signup
+      // allowance waits: a reward for an unconfirmed address is a reward for anyone who can type
+      // one. Safe to call every time -- it claims the payment with a conditional UPDATE.
+      await store.invites.rewardFor(userId).catch((error: unknown) => {
+        app.log.error({ err: error, userId }, 'could not pay an invite reward');
+        return null;
+      });
       const user = await store.findUser(userId);
 
       // Signed in on the spot when the link is opened in the browser that already holds the

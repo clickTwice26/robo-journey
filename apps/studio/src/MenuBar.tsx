@@ -41,6 +41,7 @@ import SettingsBrightnessIcon from '@mui/icons-material/SettingsBrightness';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
 import KeyboardIcon from '@mui/icons-material/Keyboard';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import PauseIcon from '@mui/icons-material/Pause';
@@ -133,6 +134,7 @@ interface Props {
   onOpenCloudProjects(): void;
   onOpenLibrary(groupId?: string): void;
   onOpenHelp(topic: HelpTopic): void;
+  onOpenInvite(): void;
   theme: ThemeControl;
   /** The seat this session is running on, for the countdown and for signing out. */
   gate: AccessGate;
@@ -145,6 +147,7 @@ export function MenuBar({
   onOpenCloudProjects,
   onOpenLibrary,
   onOpenHelp,
+  onOpenInvite,
   theme,
   gate,
 }: Props) {
@@ -504,6 +507,12 @@ export function MenuBar({
                 hint: `${MOD}⇧S`,
                 onClick: () => void saveToAccount(),
               },
+              {
+                label: 'Invite a friend…',
+                icon: <CardGiftcardIcon fontSize="small" />,
+                secondary: 'They join, you earn credits',
+                onClick: onOpenInvite,
+              },
               { divider: true },
               {
                 label: 'End session and sign out',
@@ -542,7 +551,8 @@ export function MenuBar({
     ],
     [
       actions, build, buildAndRun, cloudProjectId, close, future.length, hex,
-      canvasControls, newProject, onOpenCloudProjects, onOpenDatasheet, onOpenHelp, onOpenLibrary,
+      canvasControls, newProject, onOpenCloudProjects, onOpenDatasheet, onOpenHelp, onOpenInvite,
+      onOpenLibrary,
       past.length, save,
       saveToAccount, selection, signOut, sim, snapshot.running, theme, unplugSelection, user,
     ],
@@ -667,6 +677,19 @@ export function MenuBar({
         <Typography variant="caption" color="text.secondary" noWrap sx={{ maxWidth: 220, ml: 1 }}>
           {project.name}
         </Typography>
+
+        {/* Visible rather than filed under a menu: nobody goes looking in a dropdown for a thing
+            they do not know exists, and this one pays for itself. */}
+        {user && (
+          <Button
+            size="small"
+            startIcon={<CardGiftcardIcon sx={{ fontSize: 15 }} />}
+            onClick={onOpenInvite}
+            sx={{ ml: 1, textTransform: 'none', color: 'secondary.main' }}
+          >
+            Invite &amp; earn
+          </Button>
+        )}
 
         {/*
           The signed-in account, at the far right. Right-aligned dropdown so it

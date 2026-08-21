@@ -13,6 +13,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import type { Pool } from 'pg';
 import { AccessController, type AccessConfig } from './access.js';
 import { CreditStore } from './credits.js';
+import { Invites } from './invites.js';
 import {
   deserializeHash,
   hashPassword,
@@ -113,12 +114,16 @@ export class AccountStore {
   /** The meter on the AI features. Its own object for the same reason `access` is. */
   readonly credits: CreditStore;
 
+  /** Referrals. Depends on the ledger, because the whole point of one is that it pays out. */
+  readonly invites: Invites;
+
   constructor(
     private readonly pool: Pool,
     accessConfig: AccessConfig = {},
   ) {
     this.access = new AccessController(pool, accessConfig);
     this.credits = new CreditStore(pool);
+    this.invites = new Invites(pool, this.credits);
   }
 
   // --- Users -------------------------------------------------------------------------------------

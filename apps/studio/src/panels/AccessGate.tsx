@@ -47,6 +47,7 @@ import {
   type AccessStatus,
 } from '../auth.ts';
 import type { AccessGate as Gate } from '../useAccess.ts';
+import { clearInvite, pendingInvite } from '../invite.ts';
 
 /** Mirrors the server's minimum, so the hint appears before a round trip rejects it. */
 const MIN_PASSWORD_LENGTH = 10;
@@ -134,7 +135,10 @@ function SignIn({ gate }: { gate: Gate }) {
       const session =
         mode === 'login'
           ? await login(email, password)
-          : await register(email, password, displayName);
+          : await register(email, password, displayName, pendingInvite());
+      // Spent, whether or not it was any good: the server ignores a bad one, and keeping it would
+      // mean trying it again on the next account made in this browser.
+      if (mode !== 'login') clearInvite();
       // Out of component state the moment it is no longer needed.
       setPassword('');
       if (session.user) gate.adopt(session.user, session.access);

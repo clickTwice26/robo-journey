@@ -174,6 +174,36 @@ export const MIGRATIONS: readonly Migration[] = [
         WHERE kind = 'hold';
     `,
   },
+  {
+    id: 6,
+    name: 'invites',
+    sql: `
+      -- One code per account, made the first time somebody asks for theirs. Not made at signup:
+      -- most accounts never invite anybody, and a table of codes nobody will use is a table to
+      -- keep unique forever for nothing.
+      CREATE TABLE invite_codes (
+        user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        code       TEXT NOT NULL UNIQUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      -- Who joined on whose code. The invitee is the primary key, which is the rule stated as a
+      -- constraint rather than as application logic: an account can be invited once, ever, and no
+      -- amount of retrying or racing changes that.
+      CREATE TABLE invite_redemptions (
+        invitee_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        inviter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        code       TEXT NOT NULL,
+        -- When the inviter was actually paid. Null until the invitee confirms their address --
+        -- a reward for an unconfirmed account is a reward for anyone who can type one.
+        rewarded_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        -- Inviting yourself is not inviting anybody.
+        CONSTRAINT invite_not_self CHECK (invitee_id <> inviter_id)
+      );
+      CREATE INDEX invite_redemptions_inviter ON invite_redemptions (inviter_id, created_at DESC);
+    `,
+  },
 ];
 
 /** Bring the schema up to date. Safe to run concurrently from any number of instances. */

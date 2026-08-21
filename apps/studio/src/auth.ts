@@ -175,10 +175,12 @@ export async function register(
   email: string,
   password: string,
   displayName: string,
+  /** A code they arrived with, if any. A bad one never costs somebody their sign-up. */
+  inviteCode?: string | null,
 ): Promise<Session> {
   return call<Session>('/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ email, password, displayName }),
+    body: JSON.stringify({ email, password, displayName, inviteCode: inviteCode ?? undefined }),
   });
 }
 
@@ -254,6 +256,33 @@ export async function askAssistant(
   return call<ChatAnswer>('/assistant/chat', {
     method: 'POST',
     body: JSON.stringify({ question, workspace, history, mode }),
+  });
+}
+
+// --- Invites ------------------------------------------------------------------------------------
+
+export interface InviteSummary {
+  readonly code: string;
+  readonly invited: number;
+  readonly confirmed: number;
+  readonly earned: number;
+}
+
+export interface InviteState {
+  readonly invite: InviteSummary;
+  readonly reward: number;
+  /** Whether this account has already used somebody else's code. */
+  readonly redeemed: boolean;
+}
+
+export async function fetchInvites(): Promise<InviteState> {
+  return call<InviteState>('/invites');
+}
+
+export async function redeemInvite(code: string): Promise<InviteState> {
+  return call<InviteState>('/invites/redeem', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
   });
 }
 

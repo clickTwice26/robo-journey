@@ -64,3 +64,6 @@ export {
   verifyPassword,
 } from './passwords.js';
 export type { PasswordHash } from './passwords.js';
+
+export { INVITE_REWARD, InviteError, Invites, normaliseCode } from './invites.js';
+export type { InviteSummary } from './invites.js';

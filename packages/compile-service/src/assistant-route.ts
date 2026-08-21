@@ -20,7 +20,12 @@ import {
   type ChatMessage,
   type WorkspaceContext,
 } from '@robo-journey/assistant';
-import { InsufficientCreditsError, type AccountStore } from '@robo-journey/accounts';
+import {
+  INVITE_REWARD,
+  InviteError,
+  InsufficientCreditsError,
+  type AccountStore,
+} from '@robo-journey/accounts';
 import type { Redis } from 'ioredis';
 import { RedisRateLimiter } from './redis.js';
 import type { Guards } from './session-guard.js';
@@ -53,6 +58,55 @@ export function registerAssistantRoutes(
   app.get('/assistant/status', async (_request, reply) =>
     reply.send({ configured: Boolean(apiKey) }),
   );
+
+  /**
+   * This account's invite code, and what it has brought in.
+   *
+   * The code is made on the first request rather than at signup: most accounts never invite
+   * anybody, and a table of codes nobody will use is a table to keep unique forever for nothing.
+   */
+  app.get('/invites', async (request, reply) => {
+    const user = await guards.requireUser(request, reply);
+    if (!user) return reply;
+    return reply.send({
+      invite: await store.invites.summaryFor(user.id),
+      reward: INVITE_REWARD,
+      redeemed: await store.invites.hasRedeemed(user.id),
+    });
+  });
+
+  /**
+   * Use somebody's code.
+   *
+   * For people who already had an account when they were sent one; a code given at sign-up is
+   * taken there. Nothing is paid here either way -- the reward lands when this account confirms
+   * its address.
+   */
+  app.post<{ Body: { code?: string } }>('/invites/redeem', async (request, reply) => {
+    const user = await guards.requireUser(request, reply);
+    if (!user) return reply;
+
+    const limit = await perAccount.check(`redeem:${user.id}`);
+    if (!limit.allowed) {
+      return reply
+        .status(429)
+        .header('Retry-After', limit.retryAfter)
+        .send({ error: `Too many tries. Wait ${limit.retryAfter}s.` });
+    }
+
+    try {
+      await store.invites.redeem(request.body?.code ?? '', user.id);
+    } catch (error) {
+      if (error instanceof InviteError) return reply.status(400).send({ error: error.message });
+      throw error;
+    }
+
+    return reply.send({
+      ok: true,
+      invite: await store.invites.summaryFor(user.id),
+      redeemed: true,
+    });
+  });
 
   /** What the account has, and what a question would cost, for the panel to show before asking. */
   app.get('/credits', async (request, reply) => {

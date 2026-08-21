@@ -62,6 +62,13 @@ function Gated({
 }) {
   const gate = useAccess();
 
+  // Mirror the identity into the store, which the menu bar, the account menu and the sync
+  // indicator all read. The gate remains the authority; this is a copy for convenience, not a
+  // second source of truth.
+  useEffect(() => {
+    useStudio.getState().setUser(gate.user);
+  }, [gate.user]);
+
   if (route.kind === 'verify') {
     return <VerifyLanding gate={gate} token={route.token} onDone={() => onLeave(APP_PATH)} />;
   }

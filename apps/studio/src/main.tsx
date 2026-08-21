@@ -7,6 +7,7 @@ import { manifestToPartDefinition, parseManifest, validateManifest } from '@robo
 // palette is populated before the first render.
 import { storedManifests } from './library.ts';
 import { storedPreference } from './useThemeMode.ts';
+import { captureInvite } from './invite.ts';
 import './index.css';
 
 /**
@@ -42,6 +43,9 @@ document.documentElement.dataset.theme =
       ? 'light'
       : 'dark'
     : storedPreference();
+
+// Before anything renders, so a code cannot be lost to the first navigation.
+captureInvite();
 
 const container = document.getElementById('root');
 if (!container) throw new Error('Missing #root');
