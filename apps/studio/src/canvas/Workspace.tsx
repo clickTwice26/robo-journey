@@ -17,6 +17,7 @@ import {
 } from '@robo-journey/parts';
 import { canvas as palette } from '../theme.ts';
 import { nextId, useStudio } from '../store.ts';
+import { boundsOf, boxOf } from './arrange.ts';
 import {
   allHoles,
   nearestHole,
@@ -76,6 +77,14 @@ function contentBounds(project: Project): { x: number; y: number; w: number; h: 
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
+/** Which way each arrow key goes, in whole holes. */
+const NUDGES: Record<string, { x: number; y: number }> = {
+  ArrowLeft: { x: -1, y: 0 },
+  ArrowRight: { x: 1, y: 0 },
+  ArrowUp: { x: 0, y: -1 },
+  ArrowDown: { x: 0, y: 1 },
+};
+
 export function Workspace({ width, height, onControls, onPartContextMenu, onPartHover }: Props & {
   /** Hands zoom controls back to the hosting panel, which renders them over the canvas. */
   onControls?: (controls: CanvasControls) => void;
@@ -93,7 +102,7 @@ export function Workspace({ width, height, onControls, onPartContextMenu, onPart
   const project = useStudio((s) => s.project);
   const snapshot = useStudio((s) => s.snapshot);
   const agentFocus = useStudio((s) => s.agentFocus);
-  const selection = useStudio((s) => s.selection);
+  const selectedIds = useStudio((s) => s.selectedIds);
   const mode = useStudio((s) => s.mode);
   const {
     addPart,
@@ -101,13 +110,46 @@ export function Workspace({ width, height, onControls, onPartContextMenu, onPart
     movePartWithAttached,
     addWire,
     removeWire,
-    removePart,
     setSelection,
+    toggleSelected,
     setMode,
   } = useStudio.getState();
 
+  /** Membership is asked once per part per frame, so it wants to be a set rather than a scan. */
+  const chosen = useMemo(() => new Set(selectedIds), [selectedIds]);
+
   const [view, setView] = useState({ x: 40, y: 30, scale: 1 });
   const [hoverTerminal, setHoverTerminal] = useState<string | null>(null);
+  /**
+   * The rubber band, in millimetres, while one is being dragged.
+   *
+   * Held here rather than in the store: it exists for the length of a drag and nothing outside the
+   * canvas has any use for it.
+   */
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(
+    null,
+  );
+  /**
+   * How far the part under the cursor has been dragged, while several are selected.
+   *
+   * The others are drawn at this offset so the whole group moves together under the hand. Without
+   * it a group drag looks like one part leaving the others behind, and only snaps together on drop.
+   */
+  const [groupDrag, setGroupDrag] = useState<{ id: string; dx: number; dy: number } | null>(null);
+  /**
+   * Space held. Panning has to move somewhere once dragging empty canvas means selecting, and this
+   * is the binding every canvas tool uses for it.
+   */
+  const [panning, setPanning] = useState(false);
+  /**
+   * Set when a band has just been resolved, and cleared by the click that follows it.
+   *
+   * A drag on the canvas still ends in a click, and the click handler's job is to clear the
+   * selection -- so without this the band selects six parts and the click immediately unselects
+   * them, about a millisecond later and far too fast to see. A ref rather than state because
+   * nothing renders from it and it has to be readable in the same tick it is written.
+   */
+  const bandJustEnded = useRef(false);
   const stageRef = useRef<Konva.Stage>(null);
 
   const terminals = useMemo(() => terminalPositions(project), [project]);
@@ -210,6 +252,11 @@ export function Workspace({ width, height, onControls, onPartContextMenu, onPart
       setMode({ kind: 'select' });
       return;
     }
+    // A click that is really the end of a rubber band must not undo what the band just did.
+    if (bandJustEnded.current) {
+      bandJustEnded.current = false;
+      return;
+    }
     setSelection(null);
   }, [mode, pointerMm, addPart, setMode, setSelection]);
 
@@ -285,32 +332,79 @@ export function Workspace({ width, height, onControls, onPartContextMenu, onPart
   );
 
   /**
-   * Delete or Backspace removes the selection.
+   * The canvas's own keys.
    *
    * Bound on the window rather than the stage: Konva's canvas is not focusable, so a stage-level
    * key handler would never fire. Guarded against firing while a text field has focus, or typing
    * a resistance would delete the resistor.
    */
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
-
+    const typingNow = () => {
       const active = document.activeElement;
-      const typing =
+      return (
         active instanceof HTMLInputElement ||
         active instanceof HTMLTextAreaElement ||
-        (active instanceof HTMLElement && active.isContentEditable);
-      if (typing) return;
-
-      const selected = useStudio.getState().selection;
-      if (!selected) return;
-      event.preventDefault();
-      removePart(selected);
+        (active instanceof HTMLElement && active.isContentEditable) ||
+        (active instanceof HTMLElement && active.closest('.monaco-editor') !== null)
+      );
     };
 
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (typingNow()) return;
+      const store = useStudio.getState();
+
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        if (store.selectedIds.length === 0) return;
+        event.preventDefault();
+        store.removeSelection();
+        return;
+      }
+
+      // Escape backs out of whatever is half-done, innermost first: a wire being drawn, then a
+      // part waiting to be placed, then the selection. One key, one step back, every time.
+      if (event.key === 'Escape') {
+        if (store.mode.kind !== 'select') store.setMode({ kind: 'select' });
+        else store.setSelection(null);
+        setMarquee(null);
+        return;
+      }
+
+      if (event.code === 'Space' && !panning) {
+        // No preventDefault on the keydown alone -- Space is also "press the focused button", and
+        // taking it outright would break the toolbar for anyone using the keyboard.
+        setPanning(true);
+        return;
+      }
+
+      const step = NUDGES[event.key];
+      if (step) {
+        // With something selected the arrows move it; with nothing selected they move the view,
+        // which is what they do in every map and every canvas.
+        const far = event.shiftKey ? 10 : 1;
+        event.preventDefault();
+        if (store.selectedIds.length > 0) {
+          store.nudgeSelection(step.x * PITCH_MM * far, step.y * PITCH_MM * far);
+        } else {
+          setView((v) => ({ ...v, x: v.x - step.x * 40 * far, y: v.y - step.y * 40 * far }));
+        }
+      }
+    };
+
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') setPanning(false);
+    };
+    // Losing the window with space held would otherwise leave the canvas stuck in pan mode.
+    const onBlur = () => setPanning(false);
+
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [removePart]);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [panning]);
 
   // Publish the controls once they are stable, so the panel can render buttons over the stage.
   useEffect(() => {
@@ -320,6 +414,79 @@ export function Workspace({ width, height, onControls, onPartContextMenu, onPart
       zoomOut: () => zoomBy(1 / 1.3),
     });
   }, [onControls, fitToContent, zoomBy]);
+
+  const primary = selectedIds[selectedIds.length - 1] ?? null;
+
+  /**
+   * Begin a rubber band, if the press landed on nothing.
+   *
+   * `e.target === stage` is the test for "nothing": Konva reports the topmost shape under the
+   * pointer, so a press on a part, a pin or a wire is that shape and never the stage itself.
+   */
+  const handleStageMouseDown = useCallback(
+    (event: Konva.KonvaEventObject<MouseEvent>) => {
+      if (panning || mode.kind !== 'select') return;
+      if (event.target !== stageRef.current) return;
+      const point = pointerMm();
+      if (!point) return;
+      setMarquee({ x0: point.x, y0: point.y, x1: point.x, y1: point.y });
+    },
+    [panning, mode.kind, pointerMm],
+  );
+
+  const handleStageMouseMove = useCallback(() => {
+    if (!marquee) return;
+    const point = pointerMm();
+    if (!point) return;
+    setMarquee((band) => (band ? { ...band, x1: point.x, y1: point.y } : null));
+  }, [marquee, pointerMm]);
+
+  /**
+   * Finish the band: everything it touches becomes the selection.
+   *
+   * *Touches*, not *contains*. Having to enclose a part completely means the breadboard under a
+   * row of components swallows the band and nothing gets caught, which is exactly when you most
+   * want to sweep a few parts up.
+   */
+  const handleStageMouseUp = useCallback(
+    (event: Konva.KonvaEventObject<MouseEvent>) => {
+      if (!marquee) return;
+      setMarquee(null);
+
+      // The far corner comes from where the pointer is *now*, not from the last move event. A
+      // press and release with nothing in between -- a fast flick, or a synthetic drag -- would
+      // otherwise leave the band the zero-size rectangle it started as.
+      const end = pointerMm();
+      const x1 = end?.x ?? marquee.x1;
+      const y1 = end?.y ?? marquee.y1;
+
+      const left = Math.min(marquee.x0, x1);
+      const right = Math.max(marquee.x0, x1);
+      const top = Math.min(marquee.y0, y1);
+      const bottom = Math.max(marquee.y0, y1);
+
+      // A band smaller than a hole is a click that wobbled, and clearing the selection is what a
+      // click on empty canvas already does.
+      if (right - left < PITCH_MM / 2 && bottom - top < PITCH_MM / 2) return;
+      bandJustEnded.current = true;
+
+      const caught = project.parts
+        .filter((part) => {
+          const box = boxOf(part);
+          return (
+            box.x <= right && box.x + box.width >= left &&
+            box.y <= bottom && box.y + box.height >= top
+          );
+        })
+        .map((part) => part.id);
+
+      // Shift adds to what is already selected, so a second sweep can pick up a part the first
+      // one missed without starting over.
+      const additive = event.evt.shiftKey || event.evt.metaKey || event.evt.ctrlKey;
+      setSelection(additive ? [...new Set([...selectedIds, ...caught])] : caught);
+    },
+    [marquee, project.parts, selectedIds, setSelection, pointerMm],
+  );
 
   const wireStart = mode.kind === 'wire' ? terminals.get(mode.from) : undefined;
 
@@ -332,25 +499,39 @@ export function Workspace({ width, height, onControls, onPartContextMenu, onPart
       y={view.y}
       scaleX={view.scale}
       scaleY={view.scale}
-      draggable
+      // Dragging empty canvas draws a selection band, so panning moves to space-drag -- the same
+      // trade every canvas tool makes, and the reason the cursor changes while space is down.
+      draggable={panning}
       onWheel={handleWheel}
       onClick={handleStageClick}
+      onMouseDown={handleStageMouseDown}
+      onMouseMove={handleStageMouseMove}
+      onMouseUp={handleStageMouseUp}
+      onMouseLeave={handleStageMouseUp}
       onDragEnd={(e) => {
         // Only the stage itself pans; a part drag is handled by the part.
         if (e.target === stageRef.current) {
           setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() }));
         }
       }}
-      style={{ background: palette.background }}
+      style={{
+        background: palette.background,
+        cursor: panning ? 'grab' : mode.kind === 'place' ? 'copy' : 'default',
+      }}
     >
       {/* Static artwork. Redrawn only when the project changes. */}
       <Layer>
         <GridDots width={width} height={height} view={view} />
         {/* Under the parts, so a coupling line runs behind the things it connects rather than
             across their faces. */}
-        <SensingLayer project={project} driven={snapshot.driven} selection={selection} />
+        <SensingLayer project={project} driven={snapshot.driven} selection={primary} />
         {project.parts.map((part) => {
-          const selected = selection === part.id;
+          const selected = chosen.has(part.id);
+          // Every other selected part follows the one being dragged, so the group moves as a group
+          // rather than one part breaking away and the rest catching up on the drop.
+          const following = groupDrag !== null && selected && groupDrag.id !== part.id;
+          const followX = following ? groupDrag.dx : 0;
+          const followY = following ? groupDrag.dy : 0;
           const common = { part, selected };
           const draggable = true;
           const definition = (() => {
@@ -419,19 +600,25 @@ export function Workspace({ width, height, onControls, onPartContextMenu, onPart
               // told to turn a shape about its centre. `terminalPositions` uses the same centre,
               // and the two agreeing is what keeps a wire attached to a leg after a part is
               // turned. The drag handler undoes the half-offset to get the corner back.
-              x={mm(part.x) + mm(definition?.width ?? 0) / 2}
-              y={mm(part.y) + mm(definition?.height ?? 0) / 2}
+              x={mm(part.x + followX) + mm(definition?.width ?? 0) / 2}
+              y={mm(part.y + followY) + mm(definition?.height ?? 0) / 2}
               offsetX={mm(definition?.width ?? 0) / 2}
               offsetY={mm(definition?.height ?? 0) / 2}
               rotation={part.rotation}
               onClick={(e) => {
                 e.cancelBubble = true;
-                setSelection(part.id);
+                // Shift or the platform modifier adds and removes; a plain click replaces. Without
+                // the plain-click reset, picking one part out of six selected would silently leave
+                // the other five along for the next drag.
+                if (e.evt.shiftKey || e.evt.metaKey || e.evt.ctrlKey) toggleSelected(part.id);
+                else setSelection(part.id);
               }}
               onContextMenu={(e) => {
                 e.evt.preventDefault();
                 e.cancelBubble = true;
-                setSelection(part.id);
+                // A right-click inside a multi-selection keeps it, so the menu can act on all of
+                // them; outside one, it selects what was clicked, as a left-click would.
+                if (!chosen.has(part.id)) setSelection(part.id);
                 onPartContextMenu?.({
                   partId: part.id,
                   x: e.evt.clientX,
@@ -444,16 +631,41 @@ export function Workspace({ width, height, onControls, onPartContextMenu, onPart
               onMouseLeave={() => onPartHover?.(null)}
               // A card left hanging beside a part that is no longer there reads as a rendering
               // fault, so anything that moves the part out from under the pointer dismisses it.
-              onDragStart={() => onPartHover?.(null)}
+              onDragStart={() => {
+                onPartHover?.(null);
+                // Dragging an unselected part selects it first, so what moves is always what is
+                // highlighted. Dragging one *of* a selection keeps the selection and moves it all.
+                if (!chosen.has(part.id)) setSelection(part.id);
+              }}
+              onDragMove={(e) => {
+                if (!chosen.has(part.id) || selectedIds.length < 2) return;
+                // Report the offset so the rest of the group can be drawn following along. Only
+                // the dragged part is moved by Konva; the others are rendered at this offset until
+                // the drop, when they are all committed at once.
+                setGroupDrag({
+                  id: part.id,
+                  dx: e.target.x() / PX_PER_MM - (definition?.width ?? 0) / 2 - part.x,
+                  dy: e.target.y() / PX_PER_MM - (definition?.height ?? 0) / 2 - part.y,
+                });
+              }}
               onDragEnd={(e) => {
                 onPartHover?.(null);
+                setGroupDrag(null);
                 // The group's position is its centre, so the corner -- which is what the project
                 // stores -- is half a part back from it.
-                handleDragEnd(
-                  part.id,
-                  e.target.x() / PX_PER_MM - (definition?.width ?? 0) / 2,
-                  e.target.y() / PX_PER_MM - (definition?.height ?? 0) / 2,
-                );
+                const x = e.target.x() / PX_PER_MM - (definition?.width ?? 0) / 2;
+                const y = e.target.y() / PX_PER_MM - (definition?.height ?? 0) / 2;
+
+                if (chosen.has(part.id) && selectedIds.length > 1) {
+                  // One history entry for the whole group, and no hole-detection: a part landing
+                  // in a hole should be a deliberate placement, not a side effect of sliding six
+                  // parts across a board on the way somewhere else.
+                  useStudio
+                    .getState()
+                    .nudgeSelection(snapToPitch(x) - part.x, snapToPitch(y) - part.y);
+                  return;
+                }
+                handleDragEnd(part.id, x, y);
               }}
             >
               {shape}
@@ -510,6 +722,31 @@ export function Workspace({ width, height, onControls, onPartContextMenu, onPart
         ))}
         <AgentFocusRing project={project} focus={agentFocus} />
         {hoverTerminal && <TerminalTooltip terminal={hoverTerminal} terminals={terminals} snapshot={snapshot} />}
+
+        {/* A frame around everything selected, so a group reads as one thing to move rather than
+            several things that happen to be outlined. Only for more than one -- around a single
+            part it would be a second box a millimetre outside the first. */}
+        {selectedIds.length > 1 && !marquee && (
+          <SelectionFrame project={project} ids={selectedIds} offset={groupDrag} />
+        )}
+
+        {marquee && (
+          <Rect
+            x={mm(Math.min(marquee.x0, marquee.x1))}
+            y={mm(Math.min(marquee.y0, marquee.y1))}
+            width={mm(Math.abs(marquee.x1 - marquee.x0))}
+            height={mm(Math.abs(marquee.y1 - marquee.y0))}
+            fill={palette.selection}
+            opacity={0.12}
+            stroke={palette.selection}
+            strokeWidth={1}
+            // Scale-invariant, so the band stays a hairline when zoomed right in rather than
+            // becoming a thick slab that hides what it is selecting.
+            strokeScaleEnabled={false}
+            dash={[4, 3]}
+            listening={false}
+          />
+        )}
       </Layer>
     </Stage>
   );
@@ -540,6 +777,49 @@ function PendingWire({ from }: { from: Point }) {
 }
 
 /** Probe readout: hovering a terminal shows what a multimeter would read there. */
+/**
+ * One frame around everything selected.
+ *
+ * Drawn from the parts' own boxes rather than by grouping them in Konva: they are separate nodes
+ * on the layer, and grouping them for the sake of a rectangle would change how every one of them
+ * is positioned and turned.
+ */
+function SelectionFrame({
+  project,
+  ids,
+  offset,
+}: {
+  readonly project: Project;
+  readonly ids: readonly string[];
+  readonly offset: { id: string; dx: number; dy: number } | null;
+}) {
+  const chosen = new Set(ids);
+  const boxes = project.parts.filter((p) => chosen.has(p.id)).map(boxOf);
+  if (boxes.length < 2) return null;
+
+  const bounds = boundsOf(boxes);
+  // Follows a group drag, so the frame stays around its contents rather than being left behind.
+  const dx = offset?.dx ?? 0;
+  const dy = offset?.dy ?? 0;
+  const pad = 1.5;
+
+  return (
+    <Rect
+      x={mm(bounds.x + dx - pad)}
+      y={mm(bounds.y + dy - pad)}
+      width={mm(bounds.width + pad * 2)}
+      height={mm(bounds.height + pad * 2)}
+      stroke={palette.selection}
+      strokeWidth={1}
+      strokeScaleEnabled={false}
+      dash={[6, 4]}
+      opacity={0.7}
+      cornerRadius={3}
+      listening={false}
+    />
+  );
+}
+
 /**
  * A ring round the part the agent is changing.
  *

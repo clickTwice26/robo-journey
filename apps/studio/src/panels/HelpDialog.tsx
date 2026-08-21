@@ -89,10 +89,25 @@ function Shortcuts() {
       ],
     },
     {
+      heading: 'Selecting',
+      rows: [
+        ['Drag empty canvas', 'Sweep up everything the band touches'],
+        ['⇧ Click', 'Add a part, or take one out'],
+        ['⇧ Drag', 'Add what the band touches to the selection'],
+        [`${mod} A`, 'Select everything'],
+        ['Esc', 'Back out: the wire, then the tool, then the selection'],
+      ],
+    },
+    {
       heading: 'On the canvas',
       rows: [
-        ['R', 'Turn the selected part 90°'],
+        ['Space + drag', 'Pan'],
+        ['Arrows', 'Move the selection a hole — or pan, with nothing selected'],
+        ['⇧ Arrows', 'Ten holes at a time'],
+        ['R', 'Turn the selection 90°'],
         ['⇧ R', 'Turn it the other way'],
+        [`${mod} D`, 'Duplicate the selection'],
+        [`${mod} C / ${mod} V`, 'Copy and paste parts'],
         ['1', 'Fit the circuit to the view'],
         ['Delete', 'Remove the selection'],
       ],

@@ -34,14 +34,22 @@ import {
   type PartDefinition,
   type PartInstance,
 } from '@robo-journey/parts';
-import { useStudio } from '../store.ts';
+import { primarySelection, useStudio } from '../store.ts';
+import { MultiSelection } from './MultiSelection.tsx';
 import { PartPortrait } from './PartPortrait.tsx';
 
 export function PropertiesPanel() {
-  const selection = useStudio((s) => s.selection);
+  const selectedIds = useStudio((s) => s.selectedIds);
   return (
     <Box sx={{ height: '100%', overflow: 'auto', p: 1.5 }}>
-      <Inspector key={selection ?? 'none'} />
+      {/* Several parts is a different question from one part -- "what is this" versus "how should
+          these sit relative to each other" -- so it gets its own panel rather than a disabled
+          version of this one. */}
+      {selectedIds.length > 1 ? (
+        <MultiSelection ids={selectedIds} />
+      ) : (
+        <Inspector key={selectedIds[0] ?? 'none'} />
+      )}
     </Box>
   );
 }
@@ -217,7 +225,7 @@ const QUANTITY_LABELS: Record<string, string> = {
 };
 
 function Inspector() {
-  const selection = useStudio((s) => s.selection);
+  const selection = useStudio(primarySelection);
   const project = useStudio((s) => s.project);
   const updatePartProps = useStudio((s) => s.updatePartProps);
   const removePart = useStudio((s) => s.removePart);

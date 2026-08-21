@@ -44,7 +44,7 @@ import type { ThemeControl } from './useThemeMode.ts';
 import { restoreLibrary } from './library.ts';
 import type { AccessGate as Gate } from './useAccess.ts';
 import { AUTOSAVE_DELAY_MS, saveWorkspace } from './persistence.ts';
-import { useStudio } from './store.ts';
+import { primarySelection, useStudio } from './store.ts';
 
 /**
  * "Still there?"
@@ -256,10 +256,10 @@ export function Studio({ gate, theme }: { gate: Gate; theme: ThemeControl }) {
    * on every single click, would be the app arguing with them.
    */
   useEffect(() => {
-    let previous = useStudio.getState().selection;
+    let previous = primarySelection(useStudio.getState());
 
     return useStudio.subscribe((state) => {
-      const selection = state.selection;
+      const selection = primarySelection(state);
       if (selection === previous) return;
       previous = selection;
       if (selection === null) return;

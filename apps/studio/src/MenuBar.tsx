@@ -65,6 +65,15 @@ import type { ThemeControl } from './useThemeMode.ts';
 import type { ThemePreference } from './theme.ts';
 import type { HelpTopic } from './panels/HelpDialog.tsx';
 import { MOD, isMac, shortcut } from './shortcuts.ts';
+
+/**
+ * What Cmd+C put aside, as ids rather than as copies of parts.
+ *
+ * Module-level because it is neither document nor UI state: it must survive a re-render, must not
+ * be saved with the project, and must not be undone. Holding ids means a paste after the original
+ * was deleted quietly does nothing, which is better than resurrecting it from a stale copy.
+ */
+let clipboard: string[] = [];
 import { compileSketch, CompileUnavailableError } from './api.ts';
 import { createProject, saveProject } from './auth.ts';
 import type { AccessGate } from './useAccess.ts';
@@ -160,7 +169,7 @@ export function MenuBar({
   const toggleSound = useStudio((s) => s.toggleSound);
   const compileStatus = useStudio((s) => s.compileStatus);
   const hex = useStudio((s) => s.hex);
-  const selection = useStudio((s) => s.selection);
+  const selectedIds = useStudio((s) => s.selectedIds);
   const past = useStudio((s) => s.past);
   const future = useStudio((s) => s.future);
   const user = useStudio((s) => s.user);
@@ -264,11 +273,15 @@ export function MenuBar({
 
   const unplugSelection = useCallback(() => {
     const store = useStudio.getState();
-    if (!store.selection) return;
+    const chosen = new Set(store.selectedIds);
+    if (chosen.size === 0) return;
+    // A wire between two selected parts is *internal* to the selection and stays: unplugging a
+    // subassembly means detaching it from the board, not dismantling it.
+    const owner = (terminal: string) => terminal.slice(0, terminal.indexOf(':'));
     for (const wire of store.project.wires) {
-      if (wire.from.startsWith(`${store.selection}:`) || wire.to.startsWith(`${store.selection}:`)) {
-        store.removeWire(wire.id);
-      }
+      const from = chosen.has(owner(wire.from));
+      const to = chosen.has(owner(wire.to));
+      if (from !== to) store.removeWire(wire.id);
     }
   }, []);
 
@@ -291,13 +304,10 @@ export function MenuBar({
         // while the workspace has focus.
         if (event.key.toLowerCase() === 'r') {
           const store = useStudio.getState();
-          const selected = store.selection;
-          if (!selected) return;
-          const part = store.project.parts.find((p) => p.id === selected);
-          if (!part) return;
+          if (store.selectedIds.length === 0) return;
           event.preventDefault();
           // Shift turns the other way, which is what saves three presses to undo one.
-          store.rotatePart(selected, part.rotation + (event.shiftKey ? -90 : 90));
+          store.rotateSelection(event.shiftKey ? -90 : 90);
         }
         return;
       }
@@ -335,6 +345,39 @@ export function MenuBar({
           if (event.shiftKey) useStudio.getState().redo();
           else useStudio.getState().undo();
           break;
+        // The next four are the canvas's, and every one of them means something else inside a text
+        // editor -- select all the code, copy the code. `isTyping()` above only guards the
+        // unmodified keys, so the editor check has to be repeated here.
+        case 'a':
+          if (inEditor || isTyping()) return;
+          event.preventDefault();
+          useStudio.getState().selectAll();
+          break;
+        case 'd':
+          if (inEditor || isTyping()) return;
+          event.preventDefault();
+          useStudio.getState().duplicateSelection();
+          break;
+        case 'c':
+          if (inEditor || isTyping()) return;
+          if (useStudio.getState().selectedIds.length === 0) return;
+          event.preventDefault();
+          clipboard = [...useStudio.getState().selectedIds];
+          break;
+        case 'v': {
+          if (inEditor || isTyping()) return;
+          if (clipboard.length === 0) return;
+          event.preventDefault();
+          // Paste is duplicate-from-the-clipboard: select what was copied, copy it, and the copy
+          // becomes the selection. Nothing leaves the app, so there is no serialisation to get
+          // wrong and a paste after deleting the original does nothing rather than resurrecting it.
+          const store = useStudio.getState();
+          const alive = clipboard.filter((id) => store.project.parts.some((p) => p.id === id));
+          if (alive.length === 0) return;
+          store.setSelection(alive);
+          store.duplicateSelection();
+          break;
+        }
         default:
           break;
       }
@@ -384,15 +427,15 @@ export function MenuBar({
             label: 'Unplug selection',
             icon: <LinkOffIcon fontSize="small" />,
             secondary: 'Remove its wires, keep the part',
-            disabled: !selection,
+            disabled: selectedIds.length === 0,
             onClick: unplugSelection,
           },
           {
             label: 'Delete selection',
             icon: <DeleteOutlineIcon fontSize="small" />,
             hint: 'Del',
-            disabled: !selection,
-            onClick: () => selection && useStudio.getState().removePart(selection),
+            disabled: selectedIds.length === 0,
+            onClick: () => useStudio.getState().removeSelection(),
           },
         ],
       },
@@ -558,7 +601,7 @@ export function MenuBar({
       onOpenUpgrade,
       onOpenLibrary,
       past.length, save,
-      saveToAccount, selection, signOut, sim, snapshot.running, theme, unplugSelection, user,
+      saveToAccount, selectedIds, signOut, sim, snapshot.running, theme, unplugSelection, user,
     ],
   );
 

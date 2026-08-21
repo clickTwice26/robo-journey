@@ -7,7 +7,8 @@
  * is what makes save, undo and diff sane.
  */
 import { create } from 'zustand';
-import { emptyProject, type PartInstance, type Project, type Wire } from '@robo-journey/parts';
+import { PITCH_MM, emptyProject, type PartInstance, type Project, type Wire } from '@robo-journey/parts';
+import { arrange, type Arrangement } from './canvas/arrange.ts';
 import { EMPTY_SNAPSHOT, type SimSnapshot } from './sim/protocol.ts';
 import { restoreWorkspace } from './persistence.ts';
 import type { User } from './auth.ts';
@@ -43,7 +44,15 @@ interface StudioState {
   /** States undone but not yet superseded by a new edit. */
   future: Project[];
   snapshot: SimSnapshot;
-  selection: string | null;
+  /**
+   * Everything selected, in the order it was selected.
+   *
+   * A list rather than one id because arranging a circuit is a plural act: you line up four
+   * sensors, you move a subassembly, you delete the half of the board that was a false start. The
+   * last entry is the *primary* selection -- the one the Properties panel edits and the one a
+   * sensing halo is drawn for -- so clicking a single part behaves exactly as it did.
+   */
+  selectedIds: string[];
   /** Marked on the canvas while a plan runs, so you can see which part each step is about. */
   agentFocus: string | null;
   mode: CanvasMode;
@@ -110,7 +119,27 @@ interface StudioState {
    */
   canvasControls: CanvasControls | null;
   setCanvasControls(controls: CanvasControls | null): void;
-  setSelection(id: string | null): void;
+  /** Replace the selection. A bare id is the common case and reads better than a one-item list. */
+  setSelection(id: string | null | readonly string[]): void;
+  /** Add if absent, remove if present. Shift-click, and the only way to unpick one of many. */
+  toggleSelected(id: string): void;
+  selectAll(): void;
+  /** Move every selected part by the same offset, as one history entry. */
+  nudgeSelection(dx: number, dy: number): void;
+  /** Turn every selected part a quarter, each about its own centre. */
+  rotateSelection(degrees: number): void;
+  /** Remove every selected part and the wires attached to them. */
+  removeSelection(): void;
+  /**
+   * Copy the selection, offset by a hole so the copy is visibly not the original.
+   *
+   * Wires between two copied parts are copied too, and rewritten to point at the copies; a wire
+   * with one end outside the selection is left behind, because duplicating it would silently
+   * double the load on whatever it was attached to.
+   */
+  duplicateSelection(): void;
+  /** Line the selection up, or space it evenly. See `arrange`. */
+  arrangeSelection(how: Arrangement): void;
   /**
    * The part the agent is working on right now, or null.
    *
@@ -159,7 +188,7 @@ export const useStudio = create<StudioState>((set, get) => ({
   future: [],
   snapshot: EMPTY_SNAPSHOT,
   soundOn: true,
-  selection: null,
+  selectedIds: [],
   agentFocus: null,
   mode: { kind: 'select' },
 
@@ -186,7 +215,7 @@ export const useStudio = create<StudioState>((set, get) => ({
         project: previous,
         past: state.past.slice(0, -1),
         future: [state.project, ...state.future].slice(0, HISTORY_LIMIT),
-        selection: null,
+        selectedIds: [],
       };
     }),
 
@@ -198,7 +227,7 @@ export const useStudio = create<StudioState>((set, get) => ({
         project: next,
         past: [...state.past, state.project].slice(-HISTORY_LIMIT),
         future: rest,
-        selection: null,
+        selectedIds: [],
       };
     }),
 
@@ -271,7 +300,7 @@ export const useStudio = create<StudioState>((set, get) => ({
         // Removing a part must take its wires with it, or the project references dead terminals.
         wires: p.wires.filter((w) => !w.from.startsWith(`${id}:`) && !w.to.startsWith(`${id}:`)),
       })),
-      selection: null,
+      selectedIds: [],
     })),
 
   addWire: (wire) =>
@@ -309,7 +338,115 @@ export const useStudio = create<StudioState>((set, get) => ({
   toggleSound: () => set((state) => ({ soundOn: !state.soundOn })),
   canvasControls: null,
   setCanvasControls: (canvasControls) => set({ canvasControls }),
-  setSelection: (selection) => set({ selection }),
+  setSelection: (id) =>
+    set({ selectedIds: id === null ? [] : typeof id === 'string' ? [id] : [...id] }),
+
+  toggleSelected: (id) =>
+    set((state) => ({
+      selectedIds: state.selectedIds.includes(id)
+        ? state.selectedIds.filter((s) => s !== id)
+        // Appended, so the thing you just shift-clicked becomes the primary and the panel follows
+        // your hand rather than staying on whatever you picked first.
+        : [...state.selectedIds, id],
+    })),
+
+  selectAll: () => set((state) => ({ selectedIds: state.project.parts.map((p) => p.id) })),
+
+  nudgeSelection: (dx, dy) =>
+    set((state) => {
+      const chosen = new Set(state.selectedIds);
+      if (chosen.size === 0) return {};
+      return withHistory(state, (p) => ({
+        ...p,
+        parts: p.parts.map((part) =>
+          chosen.has(part.id) ? { ...part, x: part.x + dx, y: part.y + dy } : part,
+        ),
+      }));
+    }),
+
+  rotateSelection: (degrees) =>
+    set((state) => {
+      const chosen = new Set(state.selectedIds);
+      if (chosen.size === 0) return {};
+      return withHistory(state, (p) => ({
+        ...p,
+        parts: p.parts.map((part) =>
+          chosen.has(part.id)
+            ? { ...part, rotation: ((part.rotation + degrees) % 360 + 360) % 360 }
+            : part,
+        ),
+      }));
+    }),
+
+  removeSelection: () =>
+    set((state) => {
+      const chosen = new Set(state.selectedIds);
+      if (chosen.size === 0) return {};
+      const attached = (terminal: string) => chosen.has(terminal.slice(0, terminal.indexOf(':')));
+      return {
+        ...withHistory(state, (p) => ({
+          ...p,
+          parts: p.parts.filter((part) => !chosen.has(part.id)),
+          wires: p.wires.filter((w) => !attached(w.from) && !attached(w.to)),
+        })),
+        selectedIds: [],
+      };
+    }),
+
+  duplicateSelection: () =>
+    set((state) => {
+      const chosen = new Set(state.selectedIds);
+      if (chosen.size === 0) return {};
+
+      const originals = state.project.parts.filter((part) => chosen.has(part.id));
+      const renamed = new Map<string, string>();
+      const copies = originals.map((part) => {
+        const id = nextId(part.type.slice(0, 2));
+        renamed.set(part.id, id);
+        return { ...part, id, x: part.x + PITCH_MM, y: part.y + PITCH_MM };
+      });
+
+      // Only wires with *both* ends inside the selection. One end outside would mean the copy
+      // shares a terminal with the original, which is a second load on it rather than a copy.
+      const rewrite = (terminal: string) => {
+        const cut = terminal.indexOf(':');
+        const id = renamed.get(terminal.slice(0, cut));
+        return id === undefined ? null : `${id}${terminal.slice(cut)}`;
+      };
+      const wires = state.project.wires.flatMap((w) => {
+        const from = rewrite(w.from);
+        const to = rewrite(w.to);
+        return from && to ? [{ ...w, id: nextId('w'), from, to }] : [];
+      });
+
+      return {
+        ...withHistory(state, (p) => ({
+          ...p,
+          parts: [...p.parts, ...copies],
+          wires: [...p.wires, ...wires],
+        })),
+        // The copies become the selection, so the next drag moves what you just made.
+        selectedIds: copies.map((c) => c.id),
+      };
+    }),
+
+  arrangeSelection: (how) =>
+    set((state) => {
+      const chosen = new Set(state.selectedIds);
+      if (chosen.size < 2) return {};
+      const moved = arrange(
+        state.project.parts.filter((part) => chosen.has(part.id)),
+        how,
+      );
+      if (moved.size === 0) return {};
+      return withHistory(state, (p) => ({
+        ...p,
+        parts: p.parts.map((part) => {
+          const at = moved.get(part.id);
+          return at ? { ...part, x: at.x, y: at.y } : part;
+        }),
+      }));
+    }),
   setAgentFocus: (agentFocus) => set({ agentFocus }),
   setMode: (mode) => set({ mode }),
   setCompile: (compileStatus, diagnostics, hex) =>
@@ -330,6 +467,16 @@ export const useStudio = create<StudioState>((set, get) => ({
  * So the project gets the final say. The counter still only moves forward, which keeps ids stable
  * within a session; it just skips anything already spoken for.
  */
+/**
+ * The part the panels act on: the last one picked.
+ *
+ * Selecting six things and asking the inspector to show "the" resistance is not a question with an
+ * answer, so the panels follow the most recent pick and say plainly when there are others behind
+ * it. Shift-clicking appends, which is what makes the panel follow your hand.
+ */
+export const primarySelection = (state: StudioState): string | null =>
+  state.selectedIds[state.selectedIds.length - 1] ?? null;
+
 let counter = 0;
 export function nextId(prefix: string): string {
   const { project } = useStudio.getState();
