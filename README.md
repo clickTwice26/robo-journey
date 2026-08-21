@@ -71,6 +71,16 @@ Then open http://localhost:28610, create an account, pick **Examples → Blink a
 **Build & Run**. The service serves the studio and the API from one origin, so there is no proxy to
 configure. See [DEPLOYMENT.md](DEPLOYMENT.md) for what runs where and why.
 
+To put it on a server of your own instead, with a domain and a certificate that renews itself:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/clickTwice26/robo-journey/master/deploy/bootstrap.sh | sudo bash -s -- --domain sim.example.com --email you@example.com
+```
+
+That clones this repository and hands over to `deploy/install.sh`, which looks at what is already
+running on the machine before it changes anything -- so it will not take port 443 from a site that
+is already using it. [DEPLOYMENT.md](DEPLOYMENT.md) has the details and the flags.
+
 For day-to-day work, keep the database and cache in containers -- they are infrastructure and never
 change -- and run the service and the studio in terminals, where a restart is a second rather than
 several minutes:

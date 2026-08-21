@@ -12,6 +12,45 @@ compile cache — and losing all of it costs nothing but a few recompiles.
 
 ## Putting it on a server
 
+On a machine with nothing on it, one line takes it from bare to serving on your domain over HTTPS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/clickTwice26/robo-journey/master/deploy/bootstrap.sh | sudo bash -s -- --domain sim.example.com --email you@example.com
+```
+
+That runs as root, so read it before you trust it. It is short and it does only three things --
+check for git and docker, clone the repository to `/opt/robo-journey`, and hand over to the
+installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/clickTwice26/robo-journey/master/deploy/bootstrap.sh -o bootstrap.sh
+less bootstrap.sh
+sudo bash bootstrap.sh --domain sim.example.com --email you@example.com
+```
+
+If Docker is missing it offers to fetch [get.docker.com](https://get.docker.com) and asks first,
+because that adds a package repository to your system and is not something to do on your behalf
+quietly. `--yes` answers that too, which is what makes it usable from a provisioning tool.
+
+Run it again later and it updates: it fast-forwards the checkout and re-runs the installer, which
+keeps every secret already in `.env`. It stops rather than touching a checkout with uncommitted
+changes in it -- someone editing a config on the server is a person, not a merge conflict.
+
+| Flag | |
+|---|---|
+| `--dir <path>` | Where the checkout goes. Default `/opt/robo-journey`. |
+| `--repo <url>` | Clone from somewhere else, such as your own fork, or an SSH URL for a private one. |
+| `--branch <ref>` | Branch or tag. Default `master`. |
+| `--dry-run` | Decide everything, change nothing. Over an existing install it reads *that* install and reports the update it would make. |
+
+Everything it does not recognise is passed through to the installer, so the flags in the next
+section work here too.
+
+**It installs what is on GitHub, not what is on your laptop.** Push first, or point it at a branch
+with `--branch`.
+
+### From a checkout you already have
+
 ```bash
 sudo ./deploy/install.sh --domain sim.example.com --email you@example.com
 ```

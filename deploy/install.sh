@@ -25,7 +25,10 @@
 
 set -euo pipefail
 
-readonly REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# Assigned before it is sealed: `readonly REPO="$(...)"` would swallow a failed `cd` and leave
+# REPO empty, and an empty REPO turns every path below into one rooted at /.
+REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly REPO
 ENV_FILE="$REPO/.env"
 GENERATED="$REPO/deploy/generated"
 
@@ -253,6 +256,12 @@ fi
 
 # --- Configuration ---------------------------------------------------------------------------------
 
+# Recorded before the dry run swaps the path, because `mktemp` creates the file it names -- so
+# after the swap "does .env exist" always answers yes, and a fresh machine would be told its
+# secrets were being kept when it has none.
+ENV_EXISTED="no"
+[[ -f "$ENV_FILE" ]] && ENV_EXISTED="yes"
+
 if [[ "$DRY_RUN" == "yes" ]]; then
   # Everything is worked out for real and written somewhere harmless, so the output can be read
   # before any of it lands on the machine.
@@ -294,7 +303,7 @@ set_env() {
   fi
 }
 
-if [[ -f "$ENV_FILE" ]]; then
+if [[ "$ENV_EXISTED" == "yes" ]]; then
   good ".env exists — secrets in it will be kept"
 else
   touch "$ENV_FILE"
