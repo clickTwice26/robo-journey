@@ -44,6 +44,8 @@ interface StudioState {
   future: Project[];
   snapshot: SimSnapshot;
   selection: string | null;
+  /** Marked on the canvas while a plan runs, so you can see which part each step is about. */
+  agentFocus: string | null;
   mode: CanvasMode;
   /**
    * Whether buzzers are audible.
@@ -109,6 +111,14 @@ interface StudioState {
   canvasControls: CanvasControls | null;
   setCanvasControls(controls: CanvasControls | null): void;
   setSelection(id: string | null): void;
+  /**
+   * The part the agent is working on right now, or null.
+   *
+   * Separate from the selection because they mean different things: the selection is where *you*
+   * are, and this is where the agent is. Conflating them would leave a part looking selected after
+   * a run when you never selected it.
+   */
+  setAgentFocus(id: string | null): void;
   setMode(mode: CanvasMode): void;
   setCompile(status: CompileStatus, diagnostics: Diagnostic[], hex: string | null): void;
   setBuildError(message: string | null): void;
@@ -150,6 +160,7 @@ export const useStudio = create<StudioState>((set, get) => ({
   snapshot: EMPTY_SNAPSHOT,
   soundOn: true,
   selection: null,
+  agentFocus: null,
   mode: { kind: 'select' },
 
   user: undefined,
@@ -299,6 +310,7 @@ export const useStudio = create<StudioState>((set, get) => ({
   canvasControls: null,
   setCanvasControls: (canvasControls) => set({ canvasControls }),
   setSelection: (selection) => set({ selection }),
+  setAgentFocus: (agentFocus) => set({ agentFocus }),
   setMode: (mode) => set({ mode }),
   setCompile: (compileStatus, diagnostics, hex) =>
     set({ compileStatus, diagnostics, hex, buildError: null }),

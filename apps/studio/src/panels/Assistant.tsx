@@ -18,6 +18,8 @@ import {
   Divider,
   Stack,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
   Typography,
 } from '@mui/material';
@@ -25,6 +27,15 @@ import SendIcon from '@mui/icons-material/Send';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import TokenIcon from '@mui/icons-material/Toll';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubble';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import { AgentPlanCard, type PlanState } from './AgentPlanCard.tsx';
+import { checkPlan, type CheckedPlan } from '../agent/plan.ts';
+import { runPlan } from '../agent/run.ts';
+import type { Project } from '@robo-journey/parts';
+
+/** Ask answers; Agent proposes edits. */
+type AssistantMode = 'ask' | 'agent';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -57,6 +68,18 @@ const OPENERS = [
   'What is wrong with this circuit?',
   'Why is the simulation reporting that fault?',
   'What should I check first?',
+];
+
+/**
+ * Openers for Agent mode.
+ *
+ * Phrased as instructions rather than questions, because that is the difference between the two
+ * modes and the suggestions are where somebody works out which one they are in.
+ */
+const AGENT_OPENERS = [
+  'Fix whatever the Problems panel is reporting',
+  'Add a resistor in series with the LED',
+  'Rewrite the sketch to print the reading over serial',
 ];
 
 /**
@@ -127,6 +150,12 @@ export function AssistantPanel() {
   const hex = useStudio((state) => state.hex);
 
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [mode, setMode] = useState<AssistantMode>('ask');
+  // Keyed by the index of the turn that proposed it, so a plan stays with its own message as the
+  // conversation grows.
+  const [plans, setPlans] = useState<Record<number, { plan: CheckedPlan; state: PlanState }>>({});
+  // The project as it stood before a plan ran, so "Undo all" is one step rather than N.
+  const before = useRef<Record<number, Project>>({});
   const [question, setQuestion] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -155,8 +184,8 @@ export function AssistantPanel() {
       setBusy(true);
       setError(null);
       setQuestion('');
-      const before = [...turns, { role: 'user' as const, content: asked }];
-      setTurns(before);
+      const history = [...turns, { role: 'user' as const, content: asked }];
+      setTurns(history);
 
       try {
         const reply = await askAssistant(
@@ -171,11 +200,22 @@ export function AssistantPanel() {
             },
             voltages: snapshot.voltages,
           },
-          before.slice(-HISTORY_SENT).map(({ role, content }) => ({ role, content })),
+          history.slice(-HISTORY_SENT).map(({ role, content }) => ({ role, content })),
+          mode,
         );
 
-        setTurns([...before, { role: 'assistant', content: reply.answer, credits: reply.credits }]);
+        const turnIndex = history.length;
+        setTurns([...history, { role: 'assistant', content: reply.answer, credits: reply.credits }]);
         setBalance(reply.balance);
+
+        // Checked against the real registry and the real project before it is shown, so a step
+        // that cannot run is visible as such rather than discovered halfway through applying.
+        if (reply.plan && reply.plan.actions.length > 0) {
+          setPlans((current) => ({
+            ...current,
+            [turnIndex]: { plan: checkPlan(reply.plan!.actions, project), state: { phase: 'proposed' } },
+          }));
+        }
       } catch (caught) {
         // The question stays on screen with the failure beneath it, rather than vanishing: retyping
         // a question because the answer failed is a small insult.
@@ -190,8 +230,34 @@ export function AssistantPanel() {
         setBusy(false);
       }
     },
-    [busy, hex, project, snapshot, turns],
+    [busy, hex, mode, project, snapshot, turns],
   );
+
+  /** Run a plan, marking each step off as it goes. */
+  const apply = useCallback(async (index: number) => {
+    const entry = plans[index];
+    if (!entry || entry.state.phase !== 'proposed') return;
+
+    // Snapshot first. Undoing an agent run one action at a time is not undo, it is archaeology.
+    before.current[index] = useStudio.getState().project;
+    setPlans((current) => ({ ...current, [index]: { ...entry, state: { phase: 'running', at: 0 } } }));
+
+    const count = await runPlan(entry.plan.runnable, (at) =>
+      setPlans((current) => ({ ...current, [index]: { ...entry, state: { phase: 'running', at } } })),
+    );
+
+    setPlans((current) => ({ ...current, [index]: { ...entry, state: { phase: 'applied', count } } }));
+  }, [plans]);
+
+  const undo = useCallback((index: number) => {
+    const snapshot_ = before.current[index];
+    if (!snapshot_) return;
+    useStudio.getState().loadProject(snapshot_);
+    const entry = plans[index];
+    if (entry) {
+      setPlans((current) => ({ ...current, [index]: { ...entry, state: { phase: 'proposed' } } }));
+    }
+  }, [plans]);
 
   if (configured === false) {
     return (
@@ -212,9 +278,27 @@ export function AssistantPanel() {
         sx={{ px: 1.5, py: 1, alignItems: 'center', flexWrap: 'wrap', gap: 1 }}
       >
         <AutoAwesomeIcon fontSize="small" color="primary" />
-        <Typography variant="overline" color="text.secondary" sx={{ flex: 1 }}>
-          Asks about the circuit on screen
-        </Typography>
+        {/* Ask answers; Agent proposes edits and applies them once you say so. The switch is here
+            rather than in a menu because which of the two you get is the single most consequential
+            thing about the message you are about to send. */}
+        <ToggleButtonGroup
+          exclusive
+          size="small"
+          value={mode}
+          onChange={(_event: unknown, next: string | null) => {
+            if (next) setMode(next as AssistantMode);
+          }}
+          sx={{ flex: 1 }}
+        >
+          <ToggleButton value="ask" sx={{ py: 0.1, px: 1.25, textTransform: 'none' }}>
+            <ChatBubbleOutlineIcon sx={{ fontSize: 14, mr: 0.75 }} />
+            Ask
+          </ToggleButton>
+          <ToggleButton value="agent" sx={{ py: 0.1, px: 1.25, textTransform: 'none' }}>
+            <AutoFixHighIcon sx={{ fontSize: 14, mr: 0.75 }} />
+            Agent
+          </ToggleButton>
+        </ToggleButtonGroup>
         {balance && (
           <Tooltip title="Credits left. Each question costs a few, depending on how long the answer is.">
             <Chip
@@ -233,10 +317,11 @@ export function AssistantPanel() {
         {turns.length === 0 && !busy && (
           <Stack spacing={1} sx={{ mt: 1 }}>
             <Typography variant="body2" color="text.secondary">
-              It can see your parts, how they are wired, the sketch, and whatever the simulator is
-              currently reporting.
+              {mode === 'ask'
+                ? 'It can see your parts, how they are wired, the sketch, and whatever the simulator is currently reporting.'
+                : 'It can see the same things, and it can change them — place parts, wire them, rewrite the sketch. It proposes the changes and nothing happens until you apply them.'}
             </Typography>
-            {OPENERS.map((opener) => (
+            {(mode === 'ask' ? OPENERS : AGENT_OPENERS).map((opener) => (
               <Button
                 key={opener}
                 size="small"
@@ -279,7 +364,23 @@ export function AssistantPanel() {
                 {turn.content}
               </Typography>
             ) : (
-              <Answer text={turn.content} />
+              <>
+                <Answer text={turn.content} />
+                {plans[index] && (
+                  <AgentPlanCard
+                    plan={plans[index]!.plan}
+                    state={plans[index]!.state}
+                    onApply={() => void apply(index)}
+                    onDiscard={() =>
+                      setPlans((current) => ({
+                        ...current,
+                        [index]: { ...current[index]!, state: { phase: 'discarded' } },
+                      }))
+                    }
+                    onUndo={() => undo(index)}
+                  />
+                )}
+              </>
             )}
           </Box>
         ))}
@@ -288,7 +389,7 @@ export function AssistantPanel() {
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center', px: 1.25, py: 1 }}>
             <CircularProgress size={14} />
             <Typography variant="caption" color="text.secondary">
-              Reading your circuit…
+              {mode === 'agent' ? 'Working out what to change…' : 'Reading your circuit…'}
             </Typography>
           </Stack>
         )}
@@ -316,7 +417,7 @@ export function AssistantPanel() {
           fullWidth
           multiline
           maxRows={4}
-          placeholder="Ask about this circuit…"
+          placeholder={mode === 'agent' ? 'Tell it what to change…' : 'Ask about this circuit…'}
           value={question}
           onChange={(event) => setQuestion(event.target.value)}
           onKeyDown={(event) => {

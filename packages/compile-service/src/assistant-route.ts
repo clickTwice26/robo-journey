@@ -16,6 +16,7 @@ import {
   MAX_QUESTION_CHARS,
   ask,
   estimateChatCredits,
+  type AssistantMode,
   type ChatMessage,
   type WorkspaceContext,
 } from '@robo-journey/assistant';
@@ -35,6 +36,7 @@ interface ChatBody {
   question?: string;
   history?: ChatMessage[];
   workspace?: WorkspaceContext;
+  mode?: string;
 }
 
 /** How many turns of history a client may send back. Beyond this it is padding the context. */
@@ -98,10 +100,15 @@ export function registerAssistantRoutes(
         .send({ error: `Slow down a moment — try again in ${limit.retryAfter}s.` });
     }
 
+    // Ask answers, Agent proposes edits. Anything else is treated as Ask: a client sending a mode
+    // this server does not know should get the safe one, not an error.
+    const mode: AssistantMode = body.mode === 'agent' ? 'agent' : 'ask';
+
     const outline = {
       question,
       history: (body.history ?? []).slice(-MAX_HISTORY),
       workspace: body.workspace,
+      mode,
     };
 
     // Held before the call and settled after it. The estimate assumes the longest answer the model
@@ -133,6 +140,7 @@ export function registerAssistantRoutes(
 
       return reply.send({
         answer: reply_.answer,
+        plan: reply_.plan,
         credits: reply_.credits,
         balance,
       });

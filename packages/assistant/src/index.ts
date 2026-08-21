@@ -5,15 +5,24 @@
  * would put the key in the bundle.
  */
 export {
+  AGENT_INSTRUCTION,
   AssistantError,
   DEFAULT_CHAT_MODEL,
+  MAX_AGENT_OUTPUT_TOKENS,
   MAX_OUTPUT_TOKENS,
   MAX_QUESTION_CHARS,
   SYSTEM_INSTRUCTION,
   ask,
   estimateChatCredits,
 } from './chat.js';
-export type { ChatMessage, ChatReply, ChatRequest, ChatRole } from './chat.js';
+export type {
+  AssistantMode,
+  ChatMessage,
+  ChatReply,
+  ChatRequest,
+  ChatRole,
+} from './chat.js';
+
 
 export { describeWorkspace } from './context.js';
 export type { Fault, WorkspaceContext } from './context.js';

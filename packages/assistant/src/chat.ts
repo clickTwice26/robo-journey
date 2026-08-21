@@ -14,6 +14,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { describeWorkspace, type WorkspaceContext } from './context.js';
 import { estimateCredits, creditsFor, type TokenUsage } from './pricing.js';
+import { MAX_ACTIONS, parsePlan, type AgentPlan } from '@robo-journey/parts';
 
 /**
  * Default model.
@@ -30,6 +31,18 @@ export const DEFAULT_CHAT_MODEL = 'gemini-3.7-flash';
  * without one the hold would have to assume an unbounded answer and nobody could afford to ask.
  */
 export const MAX_OUTPUT_TOKENS = 1200;
+
+/**
+ * Ceiling on a plan.
+ *
+ * Higher than an answer because a plan can carry a rewritten sketch inside it, and a plan cut off
+ * halfway is not a shorter plan -- it is invalid JSON and a wasted call. The hold is sized from
+ * this, so agent turns are held against more and settle back the difference like any other.
+ */
+export const MAX_AGENT_OUTPUT_TOKENS = 4000;
+
+/** Ask answers; Agent proposes edits. The user picks, and the model is told which it is. */
+export type AssistantMode = 'ask' | 'agent';
 
 /** How much conversation to carry. Enough to follow a thread; not enough to bill for an essay. */
 const MAX_HISTORY_TURNS = 12;
@@ -49,6 +62,7 @@ export interface ChatRequest {
   readonly question: string;
   readonly history?: readonly ChatMessage[];
   readonly workspace: WorkspaceContext;
+  readonly mode?: AssistantMode;
 }
 
 export interface ChatReply {
@@ -56,6 +70,13 @@ export interface ChatReply {
   readonly usage: TokenUsage;
   readonly credits: number;
   readonly model: string;
+  /**
+   * The edits the agent proposes, when it proposed any.
+   *
+   * Null in Ask mode, and also in Agent mode when the model chose to answer rather than act --
+   * which is the right response to a question, and to a request it cannot carry out.
+   */
+  readonly plan: AgentPlan | null;
 }
 
 export class AssistantError extends Error {}
@@ -94,10 +115,64 @@ expression reaches the reader exactly as written. Write V_IL, or just "VIL", and
 the number as a datasheet does -- 1.50 V, 220 ohm, 93.3 mA.
 `.trim();
 
+/**
+ * What the agent may do, and how it must say so.
+ *
+ * Written as tightly as the Ask instruction and for the same reason. An agent that guesses a pin
+ * name produces a plan that looks right and wires the circuit wrong, and the user finds out when
+ * the LED does not light -- so it is told to work from the ids and pins in front of it, and to
+ * answer in prose when it is not sure rather than acting on a guess.
+ *
+ * The escape hatch matters as much as the vocabulary: returning no actions is always allowed and
+ * is the correct answer to a question, to a request it cannot carry out, and to anything it would
+ * have to invent a part number to attempt.
+ */
+export const AGENT_INSTRUCTION = `
+You are the agent inside robo-journey, a hardware-accurate Arduino circuit simulator. You are shown
+the circuit on screen and the sketch, and you can change both.
+
+Reply with JSON only. No prose outside it, no markdown fence. The shape is exactly:
+
+{"summary": "one or two sentences on what you are doing and why",
+ "actions": [ ... ]}
+
+Each action is one of:
+{"kind":"setSketch","contents":"<the whole sketch>","note":"why"}
+{"kind":"addPart","id":"r2","type":"resistor","x":40,"y":80,"props":{"ohms":220},"note":"why"}
+{"kind":"removePart","id":"r2","note":"why"}
+{"kind":"movePart","id":"r2","x":40,"y":80,"note":"why"}
+{"kind":"rotatePart","id":"fs1","rotation":90,"note":"why"}
+{"kind":"setProp","id":"r2","key":"ohms","value":330,"note":"why"}
+{"kind":"addWire","from":"uno1:D13","to":"r2:a","note":"why"}
+{"kind":"removeWire","id":"w3","note":"why"}
+
+Rules:
+- Use only part ids, part types, pin names and wire ids that appear in the workspace you were
+  given. Never invent one. If you need a part type that is not listed, say so in the summary and
+  return no actions.
+- A terminal is "partId:pinName" exactly as the workspace lists it.
+- A part you add in one action can be wired in a later action in the same plan. Give it an id that
+  is not already taken.
+- Coordinates are millimetres. Place new parts in clear space near what they connect to, not on
+  top of an existing part.
+- setSketch replaces the whole file. Include every line, not a fragment, and keep what already
+  works.
+- Prefer the smallest plan that does the job. Fixing what was asked beats rebuilding the circuit.
+- At most ${MAX_ACTIONS} actions.
+
+Returning {"summary": "...", "actions": []} is always allowed and is the right reply when the user
+asked a question rather than for a change, when the workspace does not contain what you would need,
+or when you are not sure. Say why in the summary. An empty plan with an honest reason is a better
+answer than a plan built on a guess.
+`.trim();
+
 /** Roughly what to hold before asking, so a caller can check affordability first. */
 export function estimateChatCredits(request: Omit<ChatRequest, 'apiKey'>): number {
-  return estimateCredits(buildPrompt(request), MAX_OUTPUT_TOKENS);
+  return estimateCredits(buildPrompt(request), outputLimitFor(request.mode ?? 'ask'));
 }
+
+const outputLimitFor = (mode: AssistantMode): number =>
+  mode === 'agent' ? MAX_AGENT_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS;
 
 function buildPrompt(request: Omit<ChatRequest, 'apiKey'>): string {
   const history = (request.history ?? [])
@@ -127,6 +202,7 @@ export async function ask(request: ChatRequest): Promise<ChatReply> {
   if (!question) throw new AssistantError('Ask something.');
 
   const model = request.model ?? DEFAULT_CHAT_MODEL;
+  const mode = request.mode ?? 'ask';
   const ai = new GoogleGenAI({ apiKey: request.apiKey });
   const prompt = buildPrompt(request);
 
@@ -136,11 +212,13 @@ export async function ask(request: ChatRequest): Promise<ChatReply> {
       model,
       contents: prompt,
       config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        systemInstruction: mode === 'agent' ? AGENT_INSTRUCTION : SYSTEM_INSTRUCTION,
+        maxOutputTokens: outputLimitFor(mode),
         // Some variation is wanted in prose, but this is a technical assistant answering questions
-        // about measured values, not a writing one.
-        temperature: 0.3,
+        // about measured values, not a writing one. A plan wants less still: there is a right
+        // answer to "which pin", and creativity about it is only ever wrong.
+        temperature: mode === 'agent' ? 0.1 : 0.3,
+        ...(mode === 'agent' ? { responseMimeType: 'application/json' } : {}),
       },
     });
   } catch (error) {
@@ -159,5 +237,11 @@ export async function ask(request: ChatRequest): Promise<ChatReply> {
     output: response.usageMetadata?.candidatesTokenCount ?? Math.ceil(answer.length / 3.5),
   };
 
-  return { answer, usage, credits: creditsFor(usage), model };
+  // In agent mode the reply *is* the plan. A reply that will not parse is not an error worth
+  // failing the turn over -- the summary is still worth reading -- so the plan comes back null and
+  // the user sees what the model said and no proposed edits.
+  const plan = mode === 'agent' ? parsePlan(answer) : null;
+  const text = mode === 'agent' ? (plan?.summary ?? answer) : answer;
+
+  return { answer: text, usage, credits: creditsFor(usage), model, plan };
 }

@@ -83,3 +83,13 @@ export {
   ManifestDevice,
   manifestToPartDefinition,
 } from './manifest-runtime.js';
+
+export {
+  AgentActionSchema,
+  AgentPlanSchema,
+  MAX_ACTIONS,
+  describeAction,
+  parsePlan,
+  subjectOf,
+} from './agent-actions.js';
+export type { AgentAction, AgentActionKind, AgentPlan } from './agent-actions.js';

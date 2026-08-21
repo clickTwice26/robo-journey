@@ -5,6 +5,7 @@
  * Nothing here handles a password beyond passing it straight to the server: the browser never
  * hashes, never stores, and never logs one.
  */
+import type { AgentPlan } from '@robo-journey/parts';
 
 export interface User {
   readonly id: string;
@@ -54,6 +55,8 @@ export interface ChatAnswer {
   readonly answer: string;
   readonly credits: number;
   readonly balance: CreditBalance;
+  /** The edits the agent proposes. Null in Ask mode, and when the agent chose to answer instead. */
+  readonly plan: AgentPlan | null;
 }
 
 export interface Session {
@@ -246,10 +249,11 @@ export async function askAssistant(
   question: string,
   workspace: unknown,
   history: { role: 'user' | 'assistant'; content: string }[],
+  mode: 'ask' | 'agent' = 'ask',
 ): Promise<ChatAnswer> {
   return call<ChatAnswer>('/assistant/chat', {
     method: 'POST',
-    body: JSON.stringify({ question, workspace, history }),
+    body: JSON.stringify({ question, workspace, history, mode }),
   });
 }
 

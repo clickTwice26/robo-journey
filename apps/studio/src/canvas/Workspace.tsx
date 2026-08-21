@@ -84,6 +84,7 @@ export function Workspace({ width, height, onControls, onPartContextMenu }: Prop
 }) {
   const project = useStudio((s) => s.project);
   const snapshot = useStudio((s) => s.snapshot);
+  const agentFocus = useStudio((s) => s.agentFocus);
   const selection = useStudio((s) => s.selection);
   const mode = useStudio((s) => s.mode);
   const {
@@ -491,6 +492,7 @@ export function Workspace({ width, height, onControls, onPartContextMenu }: Prop
             }}
           />
         ))}
+        <AgentFocusRing project={project} focus={agentFocus} />
         {hoverTerminal && <TerminalTooltip terminal={hoverTerminal} terminals={terminals} snapshot={snapshot} />}
       </Layer>
     </Stage>
@@ -522,6 +524,57 @@ function PendingWire({ from }: { from: Point }) {
 }
 
 /** Probe readout: hovering a terminal shows what a multimeter would read there. */
+/**
+ * A ring round the part the agent is changing.
+ *
+ * On its own layer above the artwork rather than baked into each shape, because it has to work for
+ * every part -- a breadboard, an instrument, a stimulus -- without each of them knowing about the
+ * agent. It pulses so it reads as "happening now" rather than as a second kind of selection.
+ */
+function AgentFocusRing({ project, focus }: { project: Project; focus: string | null }) {
+  const [phase, setPhase] = useState(0);
+
+  useEffect(() => {
+    if (!focus) return;
+    let raf = 0;
+    const loop = (now: number) => {
+      setPhase(now / 1000);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [focus]);
+
+  if (!focus) return null;
+  const part = project.parts.find((p) => p.id === focus);
+  if (!part) return null;
+
+  let definition;
+  try {
+    definition = partDefinition(part.type);
+  } catch {
+    return null;
+  }
+
+  const pulse = 0.5 + 0.5 * Math.sin(phase * 5);
+  const pad = 4 + pulse * 4;
+
+  return (
+    <Group listening={false}>
+      <Rect
+        x={mm(part.x) - pad}
+        y={mm(part.y) - pad}
+        width={mm(definition.width) + pad * 2}
+        height={mm(definition.height) + pad * 2}
+        cornerRadius={5}
+        stroke={palette.selection}
+        strokeWidth={2}
+        opacity={0.35 + pulse * 0.5}
+      />
+    </Group>
+  );
+}
+
 function TerminalTooltip({
   terminal,
   terminals,
