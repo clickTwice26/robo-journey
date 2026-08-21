@@ -38,6 +38,7 @@ export {
   partsPluggedInto,
   splitTerminal,
   terminalId,
+  withUniqueIds,
 } from './project.js';
 export type { PartInstance, Project, SketchFile, Wire } from './project.js';
 

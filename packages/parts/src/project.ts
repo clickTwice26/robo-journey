@@ -53,9 +53,53 @@ export type Wire = z.infer<typeof WireSchema>;
 export type SketchFile = z.infer<typeof SketchFileSchema>;
 export type Project = z.infer<typeof ProjectSchema>;
 
+/**
+ * Give every part and wire an id that nothing else in the document is using.
+ *
+ * The schema calls ids unique but cannot enforce it across an array, and a duplicate is not a
+ * cosmetic problem. The engine keys its devices by part id, so two parts sharing an id share one
+ * device: the second one placed reads the first one's value and stops responding to anything near
+ * it. That reads as a broken part rather than a broken document, which is why it is repaired on
+ * the way in rather than reported.
+ *
+ * The original keeps its id, and with it every wire, because a terminal is `<partId>:<pin>` and a
+ * wire to the second `st1` is indistinguishable from a wire to the first. The duplicate is
+ * therefore renamed and left unconnected -- recoverable, and visible in the Problems panel, which
+ * is the best that can be done for a file already written this way.
+ */
+export function withUniqueIds(project: Project): Project {
+  const taken = new Set<string>();
+
+  /** The id itself when it is free, otherwise the first `<id>-N` that is. */
+  const claim = (id: string): string => {
+    if (!taken.has(id)) {
+      taken.add(id);
+      return id;
+    }
+    let n = 2;
+    while (taken.has(`${id}-${n}`)) n += 1;
+    taken.add(`${id}-${n}`);
+    return `${id}-${n}`;
+  };
+
+  const parts = project.parts.map((part) => {
+    const id = claim(part.id);
+    return id === part.id ? part : { ...part, id };
+  });
+
+  // Wire ids share the namespace: `nextId` draws both from one counter, so a collision between a
+  // wire and a part is as reachable as one between two parts.
+  const wires = project.wires.map((wire) => {
+    const id = claim(wire.id);
+    return id === wire.id ? wire : { ...wire, id };
+  });
+
+  return { ...project, parts, wires };
+}
+
 /** Parse and validate a project file, throwing on anything malformed. */
 export function parseProject(json: unknown): Project {
-  return ProjectSchema.parse(json);
+  return withUniqueIds(ProjectSchema.parse(json));
 }
 
 /** A new, empty project with the stock Blink sketch. */

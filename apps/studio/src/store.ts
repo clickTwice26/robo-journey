@@ -317,9 +317,31 @@ export const useStudio = create<StudioState>((set, get) => ({
   setBuildError: (buildError) => set({ buildError, compileStatus: 'error', hex: null }),
 }));
 
-/** Monotonic ids for newly placed parts and wires. */
+/**
+ * Ids for newly placed parts and wires.
+ *
+ * The counter alone is not enough, and the way it failed is worth recording. It restarts at zero
+ * on every page load, so opening a saved project -- whose ids came from a previous run of the same
+ * counter -- and then placing a part hands out an id the document already contains. The engine
+ * keys its devices by part id, so the two parts share one device and the second sensor placed
+ * silently stops responding: place a heat source into a restored workspace and the sensor you
+ * added just before it goes dead.
+ *
+ * So the project gets the final say. The counter still only moves forward, which keeps ids stable
+ * within a session; it just skips anything already spoken for.
+ */
 let counter = 0;
 export function nextId(prefix: string): string {
-  counter += 1;
-  return `${prefix}${counter}`;
+  const { project } = useStudio.getState();
+  const taken = new Set<string>([
+    ...project.parts.map((p) => p.id),
+    ...project.wires.map((w) => w.id),
+  ]);
+
+  let id: string;
+  do {
+    counter += 1;
+    id = `${prefix}${counter}`;
+  } while (taken.has(id));
+  return id;
 }
