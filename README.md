@@ -243,6 +243,20 @@ so the TypeScript solver has roughly 2x headroom against the requirement. The Ru
 in reserve; `packages/sim-core/test/performance.test.ts` is the regression guard, and it asserts
 the requirement (1.0x) rather than the measured figure so it survives a slow CI box.
 
+## Documentation
+
+[docs/](docs/) is the level above the code comments: what each folder is for, how the pieces fit,
+and which file to open when you want to change something. Start with
+[docs/architecture.md](docs/architecture.md).
+
+| | |
+|---|---|
+| [architecture](docs/architecture.md) | How firmware, electricity and the browser meet. |
+| [sim-core](docs/packages/sim-core.md) · [parts](docs/packages/parts.md) · [studio](docs/apps/studio.md) | The engine, the components, the app. |
+| [compile-service](docs/packages/compile-service.md) · [accounts](docs/packages/accounts.md) | The server and its database. |
+| [assistant](docs/packages/assistant.md) · [datasheet](docs/packages/datasheet.md) | Ask, Agent, and PDF extraction. |
+| [testing](docs/testing.md) · [deployment](docs/deployment.md) | What is guarded, and where it runs. |
+
 ## License
 
 MIT
