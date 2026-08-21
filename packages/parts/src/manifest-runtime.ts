@@ -767,6 +767,8 @@ export function manifestToPartDefinition(
 const MIN_BODY_MM = 6;
 /** Clearance kept between a pin and the body's edge. */
 const PIN_MARGIN_MM = 1.2;
+/** 0.1", the spacing a breadboard hole grid is built on, and the fallback when none is stated. */
+const DEFAULT_PITCH_MM = 2.54;
 
 /**
  * Bring pins and package into agreement.
@@ -791,9 +793,15 @@ function normaliseLayout(manifest: ComponentManifest): {
   const dx = minX < 0 ? -minX + PIN_MARGIN_MM : 0;
   const dy = minY < 0 ? -minY + PIN_MARGIN_MM : 0;
 
-  const pins = dx === 0 && dy === 0
+  const shifted = dx === 0 && dy === 0
     ? manifest.pins
     : manifest.pins.map((pin) => ({ ...pin, x: pin.x + dx, y: pin.y + dy }));
+
+  const pins = centreHorizontally(
+    shifted,
+    Math.max(MIN_BODY_MM, manifest.package.widthMm),
+    manifest.package.pinPitchMm || DEFAULT_PITCH_MM,
+  );
 
   const maxX = Math.max(...pins.map((pin) => pin.x));
   const maxY = Math.max(...pins.map((pin) => pin.y));
@@ -803,6 +811,48 @@ function normaliseLayout(manifest: ComponentManifest): {
     width: Math.max(MIN_BODY_MM, manifest.package.widthMm, maxX + PIN_MARGIN_MM),
     height: Math.max(MIN_BODY_MM, manifest.package.heightMm, maxY + PIN_MARGIN_MM),
   };
+}
+
+/**
+ * Put a part's pins across the middle of its body rather than in one corner.
+ *
+ * `row()` starts a header one pitch from the left edge, which is right for a part barely wider
+ * than its own header and wrong for every module. The LCD1602's four pins sat in the left corner
+ * of an 80 mm board with 70 mm of empty blue beside them, and the coin motor's two terminals hid
+ * in a corner of a body four times their span. Real hardware centres a header or runs it along an
+ * edge; nothing tucks one into a corner, and on screen it reads as a part drawn wrong.
+ *
+ * The whole cluster moves together, so a DIP keeps its two rows facing each other and a module
+ * keeps the order its silkscreen prints.
+ *
+ * Rounded to a whole pitch rather than centred exactly, because a leg has to land in a hole. The
+ * part's position is snapped to the 2.54 mm grid, so an offset that is not a multiple of it would
+ * leave every leg permanently between two holes -- tidier, and no longer pluggable.
+ *
+ * The part's own pitch, not the breadboard's: the AMS1117 is SOT-223 and its legs really are 2.30
+ * apart. Moving it onto a 2.54 grid it was never on would be an invented number, and would push
+ * its outermost leg past the body edge so the package had to grow to cover the mistake.
+ */
+function centreHorizontally(
+  pins: ComponentManifest['pins'],
+  bodyWidth: number,
+  pitch: number,
+): ComponentManifest['pins'] {
+  const left = Math.min(...pins.map((pin) => pin.x));
+  const slack = bodyWidth - (Math.max(...pins.map((pin) => pin.x)) - left);
+
+  // A cluster as wide as the body is already spanning it -- a bent resistor, a DIP whose pins run
+  // to both edges. There is nothing to centre, and the body grows to fit it as before.
+  if (slack < 2 * PIN_MARGIN_MM) return pins;
+
+  // Half a pitch is the floor: a three-pin header on a five-pitch body is equidistant from both
+  // edges at 2.54 and at 5.08, and no amount of arithmetic centres it better without taking the
+  // legs off the grid. The epsilon settles that tie the same way every time -- 12.7 - 5.08 is
+  // 7.619999999999999, so without it two identical modules lean opposite ways.
+  const steps = Math.round(slack / 2 / pitch + 1e-9);
+  const target = Math.min(slack, steps * pitch);
+  const shift = target - left;
+  return shift === 0 ? pins : pins.map((pin) => ({ ...pin, x: pin.x + shift }));
 }
 
 function mapCategory(category: ComponentManifest['category']): PartDefinition['category'] {

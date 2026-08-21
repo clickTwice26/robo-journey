@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { digitalChannel, loadHex } from '@robo-journey/sim-core';
 import {
   BUILTIN_MANIFESTS,
+  PITCH_MM,
   buildCircuit,
   manifestToPartDefinition,
   parseManifest,
@@ -555,11 +556,20 @@ describe('rendering a generated part', () => {
     expect(xs[2]! - xs[1]!).toBeCloseTo(1.27, 6);
   });
 
-  it('leaves already-valid coordinates alone', () => {
+  it('centres a footprint on the body instead of leaving it in a corner', () => {
+    // The rule used to be "only move pins that are negative", which left a header wherever the
+    // datasheet happened to put it -- in practice hard against the left edge with the rest of the
+    // body empty beside it. The spacing is what must survive; the position is what must not.
     const definition = manifestToPartDefinition(
       withPins('neg-pins', [['a', 1, 1], ['b', 2.27, 1]]),
     );
-    expect(definition.pins.map((p) => p.x)).toEqual([1, 2.27]);
+    const xs = definition.pins.map((p) => p.x);
+    expect(xs[1]! - xs[0]!).toBeCloseTo(1.27, 6);
+
+    const left = xs[0]!;
+    const right = definition.width - xs[1]!;
+    // Half a pitch is the floor, since the legs have to stay on the hole grid.
+    expect(Math.abs(left - right)).toBeLessThanOrEqual(PITCH_MM);
   });
 
   it('grows the body when pins would overrun the stated package', () => {
