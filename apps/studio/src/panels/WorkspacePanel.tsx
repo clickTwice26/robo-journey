@@ -157,11 +157,7 @@ export function WorkspacePanel() {
       >
         {hoveredDefinition && hoveredPart && (
           <Paper elevation={8} sx={{ borderRadius: 2, border: 1, borderColor: 'divider' }}>
-            <PartCard
-              definition={hoveredDefinition}
-              props={hoveredPart.props}
-              instanceId={hoveredPart.id}
-            />
+            <PartCard definition={hoveredDefinition} instance={hoveredPart} />
           </Paper>
         )}
       </Popper>

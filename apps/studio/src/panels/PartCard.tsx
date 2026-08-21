@@ -7,14 +7,19 @@
  * wiring and the wrong thing for recognising a component.
  *
  * So this is the answer to "what is that": the photograph, the one-line description off the
- * datasheet, what the world does to it, what it does back, and the numbers that decide whether it
- * survives being wired up wrong. Everything comes from the definition, so a part generated from a
- * datasheet this morning gets the same card as one that ships with the app.
+ * datasheet, and the numbers that decide whether the part survives being wired up wrong. A part
+ * that is actually on the workspace gets its own readings on top -- what the world is doing to it
+ * right now and how it is set -- so hovering answers "what is this doing" without having to
+ * select it first and read the panel on the far side of the screen.
+ *
+ * Read-only throughout. Clicking still opens the Properties panel, which is where a part is
+ * changed; a card you cannot reach cannot have a slider on it.
  */
 import { Box, Chip, Divider, Stack, Typography } from '@mui/material';
 import BoltIcon from '@mui/icons-material/Bolt';
-import type { PartDefinition } from '@robo-journey/parts';
+import { EMISSIONS, type PartDefinition, type PartInstance } from '@robo-journey/parts';
 import { PartPortrait } from './PartPortrait.tsx';
+import { useStudio } from '../store.ts';
 
 /** Plain words for the quantities, matching the Properties panel rather than the engine. */
 const QUANTITY_LABELS: Record<string, string> = {
@@ -40,18 +45,96 @@ const CATEGORY_LABELS: Record<string, string> = {
   stimulus: 'Interaction toolkit',
 };
 
+/**
+ * How a part's own settings read.
+ *
+ * Named rather than derived from the key, because `heatC` and `smokePpm` are the names the
+ * manifest uses and not the words anybody says. Anything not listed -- a component extracted from
+ * a datasheet this morning -- falls back to its key split into words, which is worse but never
+ * wrong.
+ */
+const PROP_LABELS: Record<string, { label: string; unit?: string }> = {
+  amplitude: { label: 'Amplitude' },
+  color: { label: 'Colour' },
+  db: { label: 'Loudness', unit: 'dB' },
+  flame: { label: 'Infrared' },
+  fuseBlown: { label: 'Fuse' },
+  heatC: { label: 'Heat', unit: '°C' },
+  lux: { label: 'Brightness', unit: 'lux' },
+  mode: { label: 'Dial' },
+  moisture: { label: 'Wetness', unit: '%' },
+  moving: { label: 'Movement' },
+  offsetVolts: { label: 'Offset', unit: 'V' },
+  ohms: { label: 'Resistance', unit: 'Ω' },
+  on: { label: 'Switched' },
+  present: { label: 'Presence' },
+  pressed: { label: 'Button' },
+  range: { label: 'Range' },
+  reachMm: { label: 'Reach', unit: 'mm' },
+  smokePpm: { label: 'Smoke', unit: 'ppm' },
+  span: { label: 'Span' },
+  strength: { label: 'Strength' },
+  voltsPerDiv: { label: 'Volts/div', unit: 'V' },
+};
+
+/** "a, b and c" -- a comma before the last item reads as a missing word, not a list. */
+function list(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? '';
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+/** `reachMm` -> "Reach mm". Only ever reached by a part this build has never seen. */
+function humanise(key: string): string {
+  const words = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** Booleans read as words, because "true" is not a setting anybody recognises. */
+function readValue(key: string, value: unknown): string {
+  if (typeof value === 'boolean') {
+    if (key === 'fuseBlown') return value ? 'blown' : 'intact';
+    if (key === 'pressed') return value ? 'pressed' : 'released';
+    return value ? 'on' : 'off';
+  }
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  }
+  return String(value);
+}
+
 /** A row of `label — value`, skipped entirely when there is no value to show. */
-function Fact({ label, value }: { label: string; value: string | undefined }) {
+function Fact({
+  label,
+  value,
+  highlight = false,
+}: {
+  label: string;
+  value: string | undefined;
+  highlight?: boolean;
+}) {
   if (!value) return null;
   return (
     <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between' }}>
       <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
         {label}
       </Typography>
-      <Typography variant="caption" sx={{ textAlign: 'right' }}>
+      <Typography
+        variant="caption"
+        color={highlight ? 'primary.main' : 'text.primary'}
+        sx={{ textAlign: 'right' }}
+      >
         {value}
       </Typography>
     </Stack>
+  );
+}
+
+/** A small heading over a group of rows. */
+function Section({ title }: { title: string }) {
+  return (
+    <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mt: 1, mb: 0.25 }}>
+      {title}
+    </Typography>
   );
 }
 
@@ -71,19 +154,34 @@ function supplyRange(min: number | undefined, max: number | undefined): string |
 
 export function PartCard({
   definition,
-  props = {},
-  /** The instance's id, when the card is describing a part that is actually on the workspace. */
-  instanceId,
+  /** The part on the workspace, when the card is describing one rather than a palette entry. */
+  instance,
 }: {
   definition: PartDefinition;
-  props?: Record<string, unknown>;
-  instanceId?: string;
+  instance?: PartInstance;
 }) {
+  // Only what this part is being handed by the world, so the card re-renders with the readings
+  // and the panel hosting it does not. Subscribing any higher would redraw the canvas every frame.
+  const driven = useStudio((s) => (instance ? s.snapshot.driven[instance.id] : undefined));
+
   const spec = definition.spec;
   const limits = spec?.limits;
-  const senses = (definition.state ?? []).filter((v) => v.quantity);
-  // Pins are the other half of "can I use this": how many, and what they are called on the module.
+  const props = instance?.props ?? {};
+  const variables = definition.state ?? [];
+  const senses = variables.filter((v) => v.quantity);
   const pins = definition.pins;
+
+  // The part's own dials, which is everything it carries that is not a reading.
+  const isStimulus = definition.category === 'stimulus';
+  // What a source puts into the world, in the same plain words the sensors are described with.
+  const emits = (EMISSIONS[definition.type] ?? []).map(
+    (e) => QUANTITY_LABELS[e.quantity] ?? e.quantity,
+  );
+
+  const stateNames = new Set(variables.map((v) => v.name));
+  const settings = Object.entries({ ...definition.defaults, ...props })
+    .filter(([key]) => !stateNames.has(key))
+    .sort(([a], [b]) => a.localeCompare(b));
 
   return (
     <Box sx={{ width: 296, p: 1.5 }}>
@@ -105,49 +203,123 @@ export function PartCard({
         />
       </Stack>
 
-      <PartPortrait definition={definition} props={props} />
-
-      {spec?.description && (
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1, lineHeight: 1.5 }}>
-          {spec.description}
+      {/* A flame is not a component and has no package, so the drawing that stands in for a
+          missing photograph would be a picture of something that does not exist. What it puts
+          into the world is the useful thing to say about it instead. */}
+      {isStimulus ? (
+        <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.5 }}>
+          Put this near a sensor to trigger it. Everything within its reach is given{' '}
+          {list(emits)}, weaker the further away it is.
         </Typography>
+      ) : (
+        <>
+          <PartPortrait definition={definition} props={props} />
+          {spec?.description && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1, lineHeight: 1.5 }}>
+              {spec.description}
+            </Typography>
+          )}
+        </>
       )}
 
-      {senses.length > 0 && (
+      {/* Readings first, for a part that is on the workspace: what it is doing now is the reason
+          you put the pointer on it, and what it is rated for can wait until further down. */}
+      {instance && variables.length > 0 && (
+        <>
+          <Divider sx={{ mt: 1 }} />
+          <Section title="Reading now" />
+          <Stack spacing={0.25}>
+            {variables.map((variable) => {
+              const supplied = driven?.[variable.name];
+              const set =
+                typeof props[variable.name] === 'number'
+                  ? (props[variable.name] as number)
+                  : variable.default;
+              const value = supplied ?? set;
+              return (
+                <Fact
+                  key={variable.name}
+                  label={variable.label}
+                  value={
+                    `${value.toFixed(variable.step < 1 ? 2 : 0)}${
+                      variable.unit ? ` ${variable.unit}` : ''
+                    }` + (supplied !== undefined ? ' · from the toolkit' : '')
+                  }
+                  highlight={supplied !== undefined}
+                />
+              );
+            })}
+          </Stack>
+        </>
+      )}
+
+      {instance && settings.length > 0 && (
+        <>
+          <Section title="Set to" />
+          <Stack spacing={0.25}>
+            {settings.map(([key, value]) => (
+              <Fact
+                key={key}
+                label={PROP_LABELS[key]?.label ?? humanise(key)}
+                value={`${readValue(key, value)}${
+                  PROP_LABELS[key]?.unit ? ` ${PROP_LABELS[key]!.unit}` : ''
+                }`}
+              />
+            ))}
+          </Stack>
+        </>
+      )}
+
+      {/* On a palette entry there is nothing to read yet, so say what the part responds to
+          instead -- which is the thing you are choosing it for. */}
+      {!instance && senses.length > 0 && (
         <>
           <Divider sx={{ my: 1 }} />
           <Typography variant="caption" color="text.secondary">
-            Responds to {senses.map((v) => QUANTITY_LABELS[v.quantity!] ?? v.quantity).join(', ')}.
+            Responds to {list(senses.map((v) => QUANTITY_LABELS[v.quantity!] ?? String(v.quantity)))}.
             Drag the matching object out of the interaction toolkit to trigger it.
           </Typography>
         </>
       )}
 
-      {(limits?.vccMaxVolts !== undefined ||
-        limits?.vccMinVolts !== undefined ||
-        limits?.pinMaxAmps !== undefined ||
-        limits?.totalMaxAmps !== undefined ||
-        pins.length > 0) && <Divider sx={{ my: 1 }} />}
+      {/* Nothing about a flame is rated, and its footprint is not a fact about it, so a source
+          skips this whole block rather than printing headings over empty rows. */}
+      {!isStimulus && (
+        <>
+          <Divider sx={{ mt: 1 }} />
+          {instance && <Section title="Rated for" />}
+          <Stack spacing={0.25} sx={{ mt: instance ? 0 : 1 }}>
+            <Fact label="Supply" value={supplyRange(limits?.vccMinVolts, limits?.vccMaxVolts)} />
+            <Fact label="Max per pin" value={milliamps(limits?.pinMaxAmps)} />
+            <Fact label="Max total" value={milliamps(limits?.totalMaxAmps)} />
+            <Fact
+              label="Size"
+              value={`${definition.width.toFixed(1)} × ${definition.height.toFixed(1)} mm`}
+            />
+            {pins.length > 0 && (
+              <Fact
+                label={pins.length === 1 ? 'Pin' : `Pins (${pins.length})`}
+                // Enough to recognise the pinout, not so many that the card becomes a datasheet.
+                value={
+                  pins.slice(0, 6).map((p) => p.name).join(', ') +
+                  (pins.length > 6 ? `, +${pins.length - 6}` : '')
+                }
+              />
+            )}
+          </Stack>
+        </>
+      )}
 
-      <Stack spacing={0.25}>
-        <Fact label="Supply" value={supplyRange(limits?.vccMinVolts, limits?.vccMaxVolts)} />
-        <Fact label="Max per pin" value={milliamps(limits?.pinMaxAmps)} />
-        <Fact label="Max total" value={milliamps(limits?.totalMaxAmps)} />
-        <Fact
-          label="Size"
-          value={`${definition.width.toFixed(1)} × ${definition.height.toFixed(1)} mm`}
-        />
-        {pins.length > 0 && (
-          <Fact
-            label={pins.length === 1 ? 'Pin' : `Pins (${pins.length})`}
-            // Enough to recognise the pinout, not so many that the card becomes the datasheet.
-            value={
-              pins.slice(0, 6).map((p) => p.name).join(', ') +
-              (pins.length > 6 ? `, +${pins.length - 6}` : '')
-            }
-          />
-        )}
-      </Stack>
+      {instance && (
+        <>
+          <Divider sx={{ mt: 1 }} />
+          <Section title="On the workspace" />
+          <Stack spacing={0.25}>
+            <Fact label="Turned" value={`${instance.rotation}°`} />
+            <Fact label="At" value={`${instance.x.toFixed(1)}, ${instance.y.toFixed(1)} mm`} />
+          </Stack>
+        </>
+      )}
 
       {/* The caveat, where the manifest gives one. What a model leaves out is worth knowing
           before you wire the part up and trust what it reads. */}
@@ -183,8 +355,8 @@ export function PartCard({
       )}
 
       <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mt: 1 }}>
-        {instanceId
-          ? `${instanceId} · click to open its properties`
+        {instance
+          ? `${instance.id} · click to change any of this`
           : 'Click the part, then click the workspace to place it'}
       </Typography>
     </Box>
