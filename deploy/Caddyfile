@@ -1,0 +1,51 @@
+# The edge, when this machine's ports 80 and 443 are free.
+#
+# Caddy is here for one reason: certificates that renew themselves. Everything else it does could
+# be done by hand, and the certificate is the thing that silently expires on a Sunday.
+#
+# It is not started when something else already owns those ports -- `deploy/install.sh` checks
+# first and, if nginx or anything else is there, writes a site file for *that* proxy instead of
+# starting a second one. Two things fighting over port 443 is not a configuration, it is an outage.
+
+{
+	# Where Let's Encrypt sends expiry warnings. Blank is allowed and means no warnings, which is a
+	# choice rather than an accident: install.sh asks for it.
+	email {$RJ_ACME_EMAIL}
+
+	# Certificates and account keys live in the named volume, so a rebuild does not mean a fresh
+	# issuance -- and Let's Encrypt's rate limits are per week, not per deploy.
+	storage file_system {
+		root /data
+	}
+}
+
+{$RJ_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		# A year, and only once TLS is actually working. Setting this before a certificate exists
+		# locks people out of a site that cannot yet serve them.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		# The version of the proxy is nobody's business.
+		-Server
+	}
+
+	# Over the compose network, not the published loopback port: the app is deliberately not
+	# reachable from outside except through here.
+	reverse_proxy service:28610 {
+		# The app reads these to build absolute URLs for the links it puts in email, and to see the
+		# real client address rather than the proxy's. `RJ_TRUST_PROXY` on the service is what makes
+		# it believe them, and install.sh sets that whenever anything is in front.
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+
+		# A compile is short but not instant, and a scope panel holds a connection open.
+		transport http {
+			read_timeout 120s
+			write_timeout 120s
+		}
+	}
+}

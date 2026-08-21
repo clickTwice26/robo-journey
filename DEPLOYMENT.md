@@ -10,6 +10,39 @@ lengthened. A cooldown exists to stop one person cycling through the same seat f
 only matters when somebody else wants it. Redis holds the two things that are better off ephemeral — rate-limit counters and the
 compile cache — and losing all of it costs nothing but a few recompiles.
 
+## Putting it on a server
+
+```bash
+sudo ./deploy/install.sh --domain sim.example.com --email you@example.com
+```
+
+That is the whole thing. It writes a `.env` with a generated database password, builds the image,
+starts the stack, and waits until the app reports ready.
+
+**It looks at the machine before it changes anything**, which is the part that matters if the box
+is already doing something else. Ports 80 and 443 free means Caddy takes them and handles the
+certificate, including renewal. Anything already listening there -- nginx, Apache, another Caddy,
+a load balancer -- and Caddy is *not started at all*. Instead the app binds to loopback and the
+script writes a ready-to-paste site file for the proxy you already have, into `deploy/generated/`,
+with the two commands to enable it in the header. Nothing that was already serving is interrupted.
+
+`--dry-run` works all of it out and writes nothing, so you can read what it intends to do before
+letting it. Running it twice is safe: secrets already in `.env` are kept and never regenerated,
+while anything derived from the domain is rewritten, so changing the domain works.
+
+| Flag | |
+|---|---|
+| `--domain <host>` | The name people will use. Without one it runs on loopback with no certificate. |
+| `--email <address>` | Where Let's Encrypt sends expiry warnings. |
+| `--app-port <port>` | Where the app listens on loopback. Default 28610; it picks another if that is taken. |
+| `--behind-proxy` | Skip the check and always configure for an existing proxy. |
+| `--dry-run` | Decide everything, change nothing. |
+| `--yes` | Take every default, ask nothing. For scripts. |
+
+It also checks that the domain actually resolves to this machine before letting Caddy try for a
+certificate, because the alternative is finding out from a failed ACME challenge twenty minutes
+later, and Let's Encrypt counts failures against a weekly limit.
+
 ## The stack
 
 ```bash

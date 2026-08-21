@@ -121,5 +121,32 @@ services:
           cpus: "2.0"
           memory: 2g
 
+  caddy:
+    # Behind a profile as well, and started only when this machine's 80 and 443 are free.
+    # `deploy/install.sh` checks before enabling it; if nginx or anything else is already there it
+    # writes a site file for that proxy instead, because two things fighting over 443 is an outage
+    # rather than a configuration.
+    profiles: ["edge"]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - service
+    environment:
+      RJ_DOMAIN: ${RJ_DOMAIN:?set RJ_DOMAIN in .env, or run deploy/install.sh}
+      RJ_ACME_EMAIL: ${RJ_ACME_EMAIL:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and the ACME account key. Losing this volume means re-issuing on every deploy,
+      # and Let's Encrypt counts those per week.
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "${RJ_HTTP_PORT:-80}:80"
+      - "${RJ_HTTPS_PORT:-443}:443"
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   postgres-data:
+  caddy-data:
+  caddy-config:

@@ -10,3 +10,6 @@ coverage/
 *.db
 *.db-wal
 *.db-shm
+
+# Site files the installer writes for an existing proxy. Machine-specific.
+deploy/generated/
