@@ -64,8 +64,9 @@ export type Project = z.infer<typeof ProjectSchema>;
  *
  * The original keeps its id, and with it every wire, because a terminal is `<partId>:<pin>` and a
  * wire to the second `st1` is indistinguishable from a wire to the first. The duplicate is
- * therefore renamed and left unconnected -- recoverable, and visible in the Problems panel, which
- * is the best that can be done for a file already written this way.
+ * therefore renamed and left unconnected. That loses its connections, which is not nothing -- but
+ * the part is still on the workspace and can be rewired, and for a stimulus, which has no pins at
+ * all, the repair is exact.
  */
 export function withUniqueIds(project: Project): Project {
   const taken = new Set<string>();
