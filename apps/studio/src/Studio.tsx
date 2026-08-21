@@ -36,6 +36,7 @@ import { AssistantPanel } from './panels/Assistant.tsx';
 import { DatasheetDialog } from './panels/DatasheetDialog.tsx';
 import { CloudProjectsDialog } from './panels/CloudProjectsDialog.tsx';
 import { LibraryDialog } from './panels/LibraryDialog.tsx';
+import { HelpDialog, type HelpTopic } from './panels/HelpDialog.tsx';
 import { useBuzzerAudio } from './sim/useAudio.ts';
 import type { ThemeControl } from './useThemeMode.ts';
 import { restoreLibrary } from './library.ts';
@@ -90,7 +91,9 @@ export function Studio({ gate, theme }: { gate: Gate; theme: ThemeControl }) {
   const apiRef = useRef<DockviewApi | null>(null);
   const [datasheetOpen, setDatasheetOpen] = useState(false);
   const [cloudOpen, setCloudOpen] = useState(false);
+  const [libraryGroup, setLibraryGroup] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [helpTopic, setHelpTopic] = useState<HelpTopic | null>(null);
 
   // Buzzers, out loud. The pitch and loudness come from the worker's measurement of the actual
   // drive waveform, so this plays what the circuit is doing rather than a sound effect.
@@ -323,7 +326,11 @@ export function Studio({ gate, theme }: { gate: Gate; theme: ThemeControl }) {
           theme={theme}
           onOpenDatasheet={() => setDatasheetOpen(true)}
           onOpenCloudProjects={() => setCloudOpen(true)}
-          onOpenLibrary={() => setLibraryOpen(true)}
+          onOpenLibrary={(groupId) => {
+            setLibraryGroup(groupId ?? null);
+            setLibraryOpen(true);
+          }}
+          onOpenHelp={setHelpTopic}
         />
         <Box sx={{ flex: 1, minHeight: 0 }}>
           <DockviewReact components={components} onReady={onReady} className="dockview-theme-abyss" />
@@ -339,7 +346,12 @@ export function Studio({ gate, theme }: { gate: Gate; theme: ThemeControl }) {
       />
 
       <CloudProjectsDialog open={cloudOpen} onClose={() => setCloudOpen(false)} />
-      <LibraryDialog open={libraryOpen} onClose={() => setLibraryOpen(false)} />
+      <LibraryDialog
+        open={libraryOpen}
+        initialGroup={libraryGroup}
+        onClose={() => setLibraryOpen(false)}
+      />
+      <HelpDialog topic={helpTopic} onClose={() => setHelpTopic(null)} />
     </>
   );
 }

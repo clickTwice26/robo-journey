@@ -22,12 +22,28 @@ import {
   Stack,
   Typography,
 } from '@mui/material';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { LIBRARY, type LibraryProject } from '@robo-journey/parts';
 import { useStudio } from '../store.ts';
 
-export function LibraryDialog({ open, onClose }: { open: boolean; onClose(): void }) {
+export function LibraryDialog({
+  open,
+  onClose,
+  initialGroup,
+}: {
+  open: boolean;
+  onClose(): void;
+  /** Which group to open on, when the menu asked for one in particular. */
+  initialGroup?: string | null;
+}) {
   const [groupId, setGroupId] = useState(LIBRARY[0]!.id);
+
+  // Follow the menu's choice each time the dialog opens, rather than remembering the last one
+  // looked at: somebody who picked "Sensing" from the menu meant Sensing.
+  useEffect(() => {
+    if (open && initialGroup) setGroupId(initialGroup);
+  }, [open, initialGroup]);
+
   const group = LIBRARY.find((g) => g.id === groupId) ?? LIBRARY[0]!;
 
   const openProject = (project: LibraryProject) => {

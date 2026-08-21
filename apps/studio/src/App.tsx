@@ -13,27 +13,65 @@ import { CssBaseline, ThemeProvider } from '@mui/material';
 import { Studio } from './Studio.tsx';
 import { AccessGate, ResetLanding, VerifyLanding } from './panels/AccessGate.tsx';
 import { applyCanvasPalette, buildTheme } from './theme.ts';
-import { useThemeMode } from './useThemeMode.ts';
+import { useThemeMode, type ThemeControl } from './useThemeMode.ts';
 import { useAccess } from './useAccess.ts';
 import { useStudio } from './store.ts';
-import { useEffect, useState } from 'react';
+import { Landing } from './Landing.tsx';
+import { useCallback, useEffect, useState } from 'react';
+
+/** Where the app is. The server's catch-all serves the shell for every one of these. */
+export const APP_PATH = '/app';
+
+type Route =
+  | { kind: 'landing' }
+  | { kind: 'app' }
+  | { kind: 'verify'; token: string | null }
+  | { kind: 'reset'; token: string | null };
 
 /**
- * Where a link from an email has landed, if anywhere.
+ * Which of the four screens the address bar is asking for.
  *
- * Read once, at start-up. These are the only two paths the app treats as routes; everything else
- * is the app itself, and the server's catch-all serves the shell for all of them.
+ * Deliberately not a router: there are four paths, none of them nested, and a routing library for
+ * that is a dependency to keep current forever in exchange for nothing.
  */
-function emailLanding(): { kind: 'verify' | 'reset'; token: string | null } | null {
-  const { pathname, searchParams } = new URL(window.location.href);
+function routeFor(href: string): Route {
+  const { pathname, searchParams } = new URL(href);
   const token = searchParams.get('token');
   if (pathname === '/verify') return { kind: 'verify', token };
   if (pathname === '/reset-password') return { kind: 'reset', token };
-  return null;
+  if (pathname.startsWith(APP_PATH)) return { kind: 'app' };
+  return { kind: 'landing' };
+}
+
+/**
+ * Everything behind the gate.
+ *
+ * Its own component so that `useAccess` is not mounted on the landing page. That hook is what
+ * checks the session, holds a seat and sends the heartbeat -- run it for a visitor reading the
+ * marketing page and an already-seated user spends their hour on it, which is the opposite of what
+ * a landing page is for. Anonymous visitors also make no request at all.
+ */
+function Gated({
+  route,
+  theme,
+  onLeave,
+}: {
+  route: Route;
+  theme: ThemeControl;
+  onLeave(path: string): void;
+}) {
+  const gate = useAccess();
+
+  if (route.kind === 'verify') {
+    return <VerifyLanding gate={gate} token={route.token} onDone={() => onLeave(APP_PATH)} />;
+  }
+  if (route.kind === 'reset') {
+    return <ResetLanding gate={gate} token={route.token} onDone={() => onLeave(APP_PATH)} />;
+  }
+  return gate.phase === 'active' ? <Studio gate={gate} theme={theme} /> : <AccessGate gate={gate} />;
 }
 
 export function App() {
-  const gate = useAccess();
   const themeControl = useThemeMode();
 
   // Applied during render rather than in an effect: the Konva tree reads these colours as it
@@ -47,31 +85,33 @@ export function App() {
     document.documentElement.dataset.theme = themeControl.mode;
     document.documentElement.style.colorScheme = themeControl.mode;
   }, [themeControl.mode]);
-  // Captured once rather than watched: both screens rewrite the URL as soon as they have spent
-  // their token, and re-reading it afterwards would send them back to a landing with nothing left
-  // to do.
-  // Cleared once the screen has finished with it, rather than read again from the URL: both
-  // landings rewrite the address bar as soon as they spend their token, so re-reading would strand
-  // a confirmed account on a page with nothing left to do.
-  const [landing, setLanding] = useState(emailLanding);
+  // Captured once rather than watched, and cleared by the screen that spends it: both email
+  // landings rewrite the address bar as soon as they are done, and re-reading it afterwards would
+  // strand a confirmed account on a page with nothing left to do.
+  const [route, setRoute] = useState<Route>(() => routeFor(window.location.href));
 
-  // Mirror the identity into the store, which the menu bar and the sync indicator read. The gate
-  // remains the authority; this is a copy for convenience, not a second source of truth.
+  /** Move between the landing and the app without reloading a bundle that is already here. */
+  const go = useCallback((path: string) => {
+    window.history.pushState({}, '', path);
+    setRoute(routeFor(window.location.href));
+    window.scrollTo(0, 0);
+  }, []);
+
+  // Back and forward have to work. Someone who presses Try now and then reaches for the back
+  // button expects the page they came from, not a dead end.
   useEffect(() => {
-    useStudio.getState().setUser(gate.user);
-  }, [gate.user]);
+    const onPop = () => setRoute(routeFor(window.location.href));
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   return (
     <ThemeProvider theme={buildTheme(themeControl.mode)}>
       <CssBaseline />
-      {landing?.kind === 'verify' ? (
-        <VerifyLanding gate={gate} token={landing.token} onDone={() => setLanding(null)} />
-      ) : landing?.kind === 'reset' ? (
-        <ResetLanding gate={gate} token={landing.token} onDone={() => setLanding(null)} />
-      ) : gate.phase === 'active' ? (
-        <Studio gate={gate} theme={themeControl} />
+      {route.kind === 'landing' ? (
+        <Landing onEnter={() => go(APP_PATH)} />
       ) : (
-        <AccessGate gate={gate} />
+        <Gated route={route} theme={themeControl} onLeave={go} />
       )}
     </ThemeProvider>
   );

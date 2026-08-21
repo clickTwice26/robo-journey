@@ -38,6 +38,9 @@ import VolumeOffIcon from '@mui/icons-material/VolumeOff';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import SettingsBrightnessIcon from '@mui/icons-material/SettingsBrightness';
+import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
+import KeyboardIcon from '@mui/icons-material/Keyboard';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import PauseIcon from '@mui/icons-material/Pause';
@@ -55,9 +58,11 @@ import CloudDoneIcon from '@mui/icons-material/CloudDone';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import LogoutIcon from '@mui/icons-material/Logout';
-import { emptyProject } from '@robo-journey/parts';
+import { LIBRARY, emptyProject } from '@robo-journey/parts';
 import type { ThemeControl } from './useThemeMode.ts';
 import type { ThemePreference } from './theme.ts';
+import type { HelpTopic } from './panels/HelpDialog.tsx';
+import { MOD, isMac, shortcut } from './shortcuts.ts';
 import { compileSketch, CompileUnavailableError } from './api.ts';
 import { createProject, saveProject } from './auth.ts';
 import type { AccessGate } from './useAccess.ts';
@@ -89,9 +94,6 @@ export interface MenuBarActions {
   isPanelOpen(id: string): boolean;
 }
 
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
-const MOD = isMac ? '⌘' : 'Ctrl+';
-const shortcut = (key: string): string => `${MOD}${key}`;
 
 /**
  * Bindings the browser owns, and which this application therefore does not take.
@@ -129,7 +131,8 @@ interface Props {
   actions: MenuBarActions | null;
   onOpenDatasheet(): void;
   onOpenCloudProjects(): void;
-  onOpenLibrary(): void;
+  onOpenLibrary(groupId?: string): void;
+  onOpenHelp(topic: HelpTopic): void;
   theme: ThemeControl;
   /** The seat this session is running on, for the countdown and for signing out. */
   gate: AccessGate;
@@ -141,6 +144,7 @@ export function MenuBar({
   onOpenDatasheet,
   onOpenCloudProjects,
   onOpenLibrary,
+  onOpenHelp,
   theme,
   gate,
 }: Props) {
@@ -355,13 +359,7 @@ export function MenuBar({
           },
           { label: 'Save project', icon: <SaveIcon fontSize="small" />, hint: shortcut('S'), onClick: save },
           { divider: true },
-          {
-            label: 'Library…',
-            icon: <CollectionsBookmarkIcon fontSize="small" />,
-            secondary: 'Prebuilt projects, grouped by what they show',
-            onClick: onOpenLibrary,
-          },
-          { divider: true },
+
           {
             label: 'Add component from datasheet…',
             icon: <AutoAwesomeIcon fontSize="small" />,
@@ -451,6 +449,24 @@ export function MenuBar({
         ],
       },
       {
+        id: 'library',
+        label: 'Library',
+        items: [
+          // The groups themselves, so the menu is a way in rather than a door to another list.
+          ...LIBRARY.map((group) => ({
+            label: group.name,
+            secondary: `${group.projects.length} project${group.projects.length === 1 ? '' : 's'}`,
+            onClick: () => onOpenLibrary(group.id),
+          })),
+          { divider: true },
+          {
+            label: 'Browse all…',
+            icon: <CollectionsBookmarkIcon fontSize="small" />,
+            onClick: () => onOpenLibrary(),
+          },
+        ],
+      },
+      {
         id: 'simulate',
         label: 'Simulate',
         items: [
@@ -503,23 +519,31 @@ export function MenuBar({
         label: 'Help',
         items: [
           {
-            label: 'robo-journey',
-            secondary: 'Real firmware on an emulated ATmega328P, coupled to a real analog solver.',
-            onClick: close,
+            label: 'Getting started',
+            icon: <RocketLaunchIcon fontSize="small" />,
+            secondary: 'Place parts, wire them, press Run',
+            onClick: () => onOpenHelp('start'),
           },
           {
             label: 'Keyboard shortcuts',
-            secondary:
-              `${shortcut('↵')} build & run · ${shortcut('B')} compile · ${shortcut('S')} save · ` +
-              `${shortcut('O')} open · ${shortcut('Z')} undo · 1 fit · R rotate · Del remove`,
-            onClick: close,
+            icon: <KeyboardIcon fontSize="small" />,
+            secondary: 'Every binding, and when they apply',
+            onClick: () => onOpenHelp('shortcuts'),
+          },
+          { divider: true },
+          {
+            label: 'About robo-journey',
+            icon: <InfoOutlinedIcon fontSize="small" />,
+            secondary: 'What it does, and what it does not',
+            onClick: () => onOpenHelp('about'),
           },
         ],
       },
     ],
     [
       actions, build, buildAndRun, cloudProjectId, close, future.length, hex,
-      canvasControls, newProject, onOpenCloudProjects, onOpenDatasheet, onOpenLibrary, past.length, save,
+      canvasControls, newProject, onOpenCloudProjects, onOpenDatasheet, onOpenHelp, onOpenLibrary,
+      past.length, save,
       saveToAccount, selection, signOut, sim, snapshot.running, theme, unplugSelection, user,
     ],
   );
