@@ -132,7 +132,12 @@ services:
     depends_on:
       - service
     environment:
-      RJ_DOMAIN: ${RJ_DOMAIN:?set RJ_DOMAIN in .env, or run deploy/install.sh}
+      # Not `:?` -- compose interpolates every service in the file even when you name two on the
+      # command line, so a required variable here made `docker compose up postgres redis` fail on
+      # any machine without a domain set. That is the ordinary dev case. Caddy runs only under the
+      # edge profile, and an empty site address is a Caddyfile parse error, so it still fails
+      # loudly -- just at its own startup rather than in everybody else's.
+      RJ_DOMAIN: ${RJ_DOMAIN:-}
       RJ_ACME_EMAIL: ${RJ_ACME_EMAIL:-}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
