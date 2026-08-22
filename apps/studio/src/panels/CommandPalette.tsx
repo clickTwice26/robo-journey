@@ -84,6 +84,11 @@ export function CommandPalette({
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
+  // Whether the highlight last moved because somebody pressed an arrow key. Only then is the list
+  // allowed to scroll itself -- see the effect below.
+  const arrowed = useRef(false);
+  // Where the pointer last actually was, as opposed to where a scroll left it.
+  const pointer = useRef({ x: -1, y: -1 });
   const setMode = useStudio((s) => s.setMode);
 
   // Every part, as "Add …". Built here rather than passed in because nothing else needs it, and
@@ -125,12 +130,43 @@ export function CommandPalette({
     }
   }, [open]);
 
-  useEffect(() => setCursor(0), [query]);
-
-  // Keep the highlighted row on screen when arrowing past the fold.
+  // A new query means a new list, so start at the top -- of the highlight and of the scroll. Done
+  // here rather than by letting the effect below notice, because when the cursor is already 0 there
+  // is nothing for it to notice.
   useEffect(() => {
+    setCursor(0);
+    listRef.current?.scrollTo({ top: 0 });
+  }, [query]);
+
+  /**
+   * Keep the highlighted row on screen when arrowing past the fold.
+   *
+   * Only when arrowing. This used to run whenever `matches` changed identity, which sounds like
+   * "whenever the list changes" and is not: the parent rebuilds its command array on every render,
+   * so the effect fired several times a second and dragged the list back to the highlighted row --
+   * row 0, until you touch the keyboard. Scrolling the palette with a mouse was impossible.
+   *
+   * The list's scroll position belongs to whoever is scrolling it. We move it only when the
+   * keyboard moves the selection somewhere the person cannot see.
+   */
+  useEffect(() => {
+    if (!arrowed.current) return;
+    arrowed.current = false;
     listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
-  }, [cursor, matches]);
+  }, [cursor]);
+
+  /**
+   * Highlight the row under the pointer -- but only if the pointer is what moved.
+   *
+   * Rows sliding under a stationary cursor during a wheel scroll are reported as mousemove too.
+   * Treating that as hover moves the highlight while somebody is reading further down the list.
+   */
+  const hover = (event: React.MouseEvent, index: number) => {
+    if (event.clientX === pointer.current.x && event.clientY === pointer.current.y) return;
+    pointer.current = { x: event.clientX, y: event.clientY };
+    arrowed.current = false;
+    setCursor(index);
+  };
 
   const runAt = (index: number) => {
     const command = matches[index];
@@ -142,9 +178,11 @@ export function CommandPalette({
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
+      arrowed.current = true;
       setCursor((c) => (matches.length === 0 ? 0 : (c + 1) % matches.length));
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
+      arrowed.current = true;
       setCursor((c) => (matches.length === 0 ? 0 : (c - 1 + matches.length) % matches.length));
     } else if (event.key === 'Enter') {
       event.preventDefault();
@@ -205,7 +243,7 @@ export function CommandPalette({
               <ListItemButton
                 data-active={index === cursor}
                 selected={index === cursor}
-                onMouseMove={() => setCursor(index)}
+                onMouseMove={(event) => hover(event, index)}
                 onClick={() => runAt(index)}
                 sx={{ px: 2, py: 0.75 }}
               >
