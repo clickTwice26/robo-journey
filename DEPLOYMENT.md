@@ -154,16 +154,14 @@ whichever request happened to need it first.
 | `REDIS_URL` | — | Required. |
 | `RJ_ACCESS_CAPACITY` | `10` | People using the simulator at once. |
 | `RJ_ACCESS_SESSION_MINUTES` | `60` | Length of a turn. |
-| `RJ_ACCESS_COOLDOWN_MIN_MINUTES` | `1` | Wait between turns when nobody is queuing. |
-| `RJ_ACCESS_COOLDOWN_MAX_MINUTES` | `20` | Ceiling on that wait, reached when the queue is as long as the room is wide. |
 | `RJ_ACCESS_IDLE_MINUTES` | `2` | Untouched seat passes to the next person. |
 | `RJ_TRUST_PROXY` | `false` | Turn on **only** behind something that sets `X-Forwarded-For`. Trusting it otherwise lets any client claim any address and every per-address limit becomes decorative. |
 | `RJ_DB_SSL` | `false` | Verify the server certificate. |
 | `RJ_SIGNUP_CREDITS` | `100` | Credits a confirmed account starts with. Granted on confirmation, not signup: accounts are free, so an allowance given to an unconfirmed address is one given to anybody who can type an address. |
 | `GEMINI_API_KEY` | — | Optional. Without it datasheet extraction reports itself unavailable and everything else works. |
-| `RJ_PUBLIC_URL` | `http://localhost:28610` | Where the app is reached from. Every link in outgoing mail is built from it, so it cannot be guessed from a request — a `Host` header is attacker-controlled. Production refuses to start if this is still localhost. |
+| `RJ_PUBLIC_URL` | `http://localhost:28610` | Where the app is reached from. Every link in outgoing mail is built from it, so it cannot be guessed from a request — a `Host` header is attacker-controlled. Warned about at start-up when a mail server is configured, but not enforced — set it before anyone else signs up. |
 | `RJ_REQUIRE_VERIFIED_EMAIL` | `true` | Whether an address must be confirmed before an account can take a seat. |
-| `SMTP_HOST` | — | Unset means links are printed to the log instead of sent, which is how local development works. Production refuses to start with verification on and no mail server. |
+| `SMTP_HOST` | — | Unset means links are printed to the log instead of sent, which is how local development works. Production refuses to start with verification on and no mail server, so `install.sh` asks for it and offers to turn verification off instead. |
 | `SMTP_PORT` | `587` | |
 | `SMTP_SECURE` | inferred | `true` on port 465, `false` elsewhere. Set it only to override. On STARTTLS ports the code requires the upgrade, so credentials are never sent in the clear either way. |
 | `SMTP_USER` / `SMTP_PASSWORD` | — | |

@@ -54,9 +54,14 @@ good() { printf '    %s✓%s %s\n' "$GREEN" "$R" "$1"; }
 warn() { printf '    %s!%s %s\n' "$YELLOW" "$R" "$1"; }
 die()  { printf '\n%serror:%s %s\n\n' "$RED" "$R" "$1" >&2; exit 1; }
 
+# Prompts read from /dev/tty, not stdin. Under `curl | sudo bash` stdin is the script itself, so
+# testing stdin concludes nobody is there to answer while somebody is sitting right here -- which
+# is how the DNS guard below used to answer itself.
+have_tty() { [[ -e /dev/tty ]]; }
+
 ask() { # ask "prompt" "default" -> echoes the answer
   local prompt="$1" default="${2:-}" answer=""
-  if [[ "$ASSUME_YES" == "yes" || ! -t 0 ]]; then
+  if [[ "$ASSUME_YES" == "yes" ]] || ! have_tty; then
     printf '%s\n' "$default"
     return
   fi
@@ -68,9 +73,22 @@ ask() { # ask "prompt" "default" -> echoes the answer
   printf '%s\n' "${answer:-$default}"
 }
 
+ask_secret() { # ask_secret "prompt" -> echoes the answer without printing it
+  local prompt="$1" answer=""
+  if [[ "$ASSUME_YES" == "yes" ]] || ! have_tty; then
+    printf '\n'
+    return
+  fi
+  read -r -s -p "    $prompt: " answer </dev/tty || true
+  printf '\n' >/dev/tty
+  printf '%s\n' "$answer"
+}
+
+# No tty means no. It used to mean yes, which quietly turned the "this domain does not point here"
+# guard into a rubber stamp on exactly the unattended runs that most needed it.
 confirm() { # confirm "question" -> 0 for yes
   [[ "$ASSUME_YES" == "yes" ]] && return 0
-  [[ ! -t 0 ]] && return 0
+  have_tty || return 1
   local answer
   read -r -p "    $1 [y/N]: " answer </dev/tty || true
   [[ "$answer" =~ ^[Yy] ]]
@@ -108,27 +126,15 @@ done
 
 # What is listening on a TCP port, as "name (pid)", or nothing.
 #
-# Two tools because neither is everywhere: ss on modern Linux, lsof on macOS and older boxes. The
-# process name needs root on both; without it the port still reports as busy, which is the part
-# that matters.
+# ss from iproute2; preflight has already established it is here. Naming the process needs root,
+# but without root the port still reports busy, which is the part the decision turns on.
 listener_on() {
-  local port="$1" out=""
-  if command -v ss >/dev/null 2>&1; then
-    out="$(ss -H -ltnp "sport = :$port" 2>/dev/null | head -n1 || true)"
-    [[ -z "$out" ]] && return 0
-    local who
-    who="$(printf '%s' "$out" | grep -o 'users:((\"[^\"]*\",pid=[0-9]*' | head -n1 |
-           sed 's/users:((\"//; s/\",pid=/ (/')"
-    [[ -n "$who" ]] && printf '%s)\n' "$who" || printf 'something\n'
-    return 0
-  fi
-  if command -v lsof >/dev/null 2>&1; then
-    out="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | awk 'NR==2 {print $1" ("$2")"}')"
-    [[ -n "$out" ]] && printf '%s\n' "$out"
-    return 0
-  fi
-  # Neither tool. Report free rather than guessing busy: refusing to install because we cannot see
-  # is worse than trying and having the bind fail loudly.
+  local port="$1" out="" who=""
+  out="$(ss -H -ltnp "sport = :$port" 2>/dev/null | head -n1 || true)"
+  [[ -z "$out" ]] && return 0
+  who="$(printf '%s' "$out" | grep -o 'users:((\"[^\"]*\",pid=[0-9]*' | head -n1 |
+         sed 's/users:((\"//; s/\",pid=/ (/')"
+  [[ -n "$who" ]] && printf '%s)\n' "$who" || printf 'something\n'
   return 0
 }
 
@@ -136,21 +142,21 @@ port_busy() { [[ -n "$(listener_on "$1")" ]]; }
 
 # First A record for a name, or nothing.
 #
-# Three tools because no single one is on every box: getent is Linux, dig and host are wherever
-# someone installed them, and macOS has neither getent nor dig by default. Returning nothing is a
-# legitimate answer -- it means "could not check", and the caller treats that as "carry on".
+# dig first when it is installed, because it asks DNS and nothing else. getent goes through NSS,
+# which reads /etc/hosts -- and a cloud image that pinned its own hostname to 127.0.0.1 would then
+# report the domain as pointing somewhere it does not, failing the check below for no reason.
+# getent is the fallback because it is always present and dig often is not.
+#
+# Returning nothing is a legitimate answer -- it means "could not check", and the caller treats
+# that as "carry on".
 resolve_a() {
   local name="$1" out=""
-  if command -v getent >/dev/null 2>&1; then
-    out="$(getent ahostsv4 "$name" 2>/dev/null | awk 'NR==1 {print $1}' || true)"
-    [[ -n "$out" ]] && { printf "%s\n" "$out"; return 0; }
-  fi
   if command -v dig >/dev/null 2>&1; then
     out="$(dig +short +time=3 A "$name" 2>/dev/null | grep -Eo '^[0-9.]+$' | head -n1 || true)"
-    [[ -n "$out" ]] && { printf "%s\n" "$out"; return 0; }
+    [[ -n "$out" ]] && { printf '%s\n' "$out"; return 0; }
   fi
-  if command -v host >/dev/null 2>&1; then
-    out="$(host -t A "$name" 2>/dev/null | awk '/has address/ {print $NF; exit}' || true)"
+  if command -v getent >/dev/null 2>&1; then
+    out="$(getent ahostsv4 "$name" 2>/dev/null | awk 'NR==1 {print $1}' || true)"
     [[ -n "$out" ]] && { printf '%s\n' "$out"; return 0; }
   fi
   # Nothing found is a legitimate answer, not a failure. Falling out of here non-zero would take
@@ -162,6 +168,16 @@ resolve_a() {
 # --- Preflight ----------------------------------------------------------------------------------
 
 step "Checking this machine"
+
+# Linux servers only. The port and DNS probes below are iproute2 and NSS, the generated site files
+# assume systemd, and the install target is /opt -- none of that is worth pretending about.
+[[ "$(uname -s)" == "Linux" ]] || die \
+  "this installer supports Linux servers only (this is $(uname -s))."
+
+command -v ss >/dev/null 2>&1 || die \
+  "ss is missing; it ships in iproute2. Install that and run this again. Without it this script
+       cannot see what is already on 80 and 443, and starting Caddy blind would take down whatever
+       is there."
 
 command -v docker >/dev/null 2>&1 || die \
   "docker is not installed. See https://docs.docker.com/engine/install/ and run this again."
@@ -292,15 +308,10 @@ keep_env() {
 # domain actually changes the domain.
 set_env() {
   local key="$1" value="$2"
-  if grep -qE "^${key}=" "$ENV_FILE" 2>/dev/null; then
-    # A temporary file rather than sed -i, which is not portable between GNU and BSD.
-    local tmp; tmp="$(mktemp)"
-    grep -vE "^${key}=" "$ENV_FILE" >"$tmp" || true
-    printf '%s=%s\n' "$key" "$value" >>"$tmp"
-    mv "$tmp" "$ENV_FILE"
-  else
-    printf '%s=%s\n' "$key" "$value" >>"$ENV_FILE"
-  fi
+  # Drop then append. The value is appended by printf rather than substituted into the sed
+  # expression, so a password full of slashes and ampersands needs no escaping.
+  sed -i "/^${key}=/d" "$ENV_FILE"
+  printf '%s=%s\n' "$key" "$value" >>"$ENV_FILE"
 }
 
 if [[ "$ENV_EXISTED" == "yes" ]]; then
@@ -338,8 +349,77 @@ good "wrote settings to .env"
 if ! grep -qE '^GEMINI_API_KEY=.+' "$ENV_FILE"; then
   note "GEMINI_API_KEY is empty — the assistant will report itself as unconfigured until it is set."
 fi
+
+# --- Mail ------------------------------------------------------------------------------------------
+
+# The packaged stack runs with NODE_ENV=production, and there the service refuses to start when
+# verification is on and no mail server is configured: a deployment that demands a confirmed
+# address and cannot send one is a deployment nobody can ever get into. That refusal is right. What
+# was wrong was finding out about it from a container restarting behind a two-minute readiness
+# poll, having just been told mail would be "logged instead of sent" -- true of a dev run, not of
+# this one. So it is settled here, while somebody is still watching.
 if ! grep -qE '^SMTP_HOST=.+' "$ENV_FILE"; then
-  note "SMTP_HOST is empty — confirmation mail will be logged instead of sent."
+  step "Email"
+
+  if grep -qE '^RJ_REQUIRE_VERIFIED_EMAIL=false$' "$ENV_FILE"; then
+    warn "No mail server, and verification is already off in .env. Leaving it that way."
+    warn "Anyone can sign up with an address they do not own."
+  else
+    info "No mail server is configured, and the service will not start without one unless email"
+    info "verification is turned off. Confirming an address is what makes a free account cost"
+    info "anything, which is what the queue and the per-account limits rest on."
+    info ""
+
+    SMTP_HOST_IN="$(ask "SMTP host (blank to run without email verification)" "")"
+
+    if [[ -n "$SMTP_HOST_IN" ]]; then
+      SMTP_PORT_IN="$(ask "SMTP port" "587")"
+      SMTP_USER_IN="$(ask "SMTP username" "")"
+      SMTP_PASSWORD_IN="$(ask_secret "SMTP password")"
+      SMTP_FROM_IN="$(ask "From address" "robo-journey <no-reply@$DOMAIN>")"
+
+      set_env SMTP_HOST "$SMTP_HOST_IN"
+      set_env SMTP_PORT "$SMTP_PORT_IN"
+      set_env SMTP_USER "$SMTP_USER_IN"
+      set_env SMTP_PASSWORD "$SMTP_PASSWORD_IN"
+      set_env SMTP_FROM "$SMTP_FROM_IN"
+      set_env RJ_REQUIRE_VERIFIED_EMAIL true
+
+      good "mail via $SMTP_HOST_IN:$SMTP_PORT_IN"
+      note "The From address has to be one the provider has already verified, or it will accept"
+      note "the connection and reject every send."
+    else
+      warn "Running without email verification."
+      warn ""
+      warn "Accounts are free and nothing will confirm they are real, so the per-account limits"
+      warn "the queue depends on can be walked around by signing up again. Fine for a machine only"
+      warn "you can reach; think about it before anyone else can."
+      warn ""
+      warn "Set SMTP_HOST in .env and run this again to turn it back on."
+
+      if ! confirm "Continue without it?"; then
+        die "Set SMTP_HOST, SMTP_USER and SMTP_PASSWORD in $ENV_FILE, then run this again."
+      fi
+      set_env RJ_REQUIRE_VERIFIED_EMAIL false
+    fi
+  fi
+
+# A mail server is configured, so nothing is broken and the service will start. But verification
+# being off with mail available is almost always a line somebody added to get past a local test and
+# meant to take out again, and it is invisible from the outside until strangers are signing up with
+# addresses they do not own.
+elif grep -qE '^RJ_REQUIRE_VERIFIED_EMAIL=false$' "$ENV_FILE"; then
+  step "Email"
+  warn "A mail server is configured, but .env turns verification off:"
+  warn ""
+  warn "    RJ_REQUIRE_VERIFIED_EMAIL=false"
+  warn ""
+  warn "Mail would work. Nothing will ask signups to prove the address is theirs, so the"
+  warn "per-account limits the queue rests on can be walked around by signing up again."
+  warn "If that line was for a test, take it out and run this again."
+  if ! confirm "Deploy with verification off anyway?"; then
+    die "Remove RJ_REQUIRE_VERIFIED_EMAIL=false from $ENV_FILE, then run this again."
+  fi
 fi
 
 # --- Bring it up -------------------------------------------------------------------------------------

@@ -95,9 +95,14 @@ done
 
 step "Checking this machine"
 
+# Linux servers only, and worth saying before this starts installing packages on something it was
+# never meant to touch.
+[[ "$(uname -s)" == "Linux" ]] || die \
+  "this installer supports Linux servers only (this is $(uname -s))."
+
 # The package manager, if we recognise it. Used only to offer to install git.
 PKG=""
-for candidate in apt-get dnf yum pacman apk brew; do
+for candidate in apt-get dnf yum pacman apk; do
   if command -v "$candidate" >/dev/null 2>&1; then PKG="$candidate"; break; fi
 done
 
@@ -109,7 +114,6 @@ install_package() { # install_package <name>
     yum)     yum install -y -q "$name" ;;
     pacman)  pacman -Sy --noconfirm "$name" ;;
     apk)     apk add --no-cache "$name" ;;
-    brew)    brew install "$name" ;;
     *) return 1 ;;
   esac
 }

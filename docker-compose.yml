@@ -83,7 +83,6 @@ services:
       RJ_STATIC_DIR: /app/public
       RJ_ACCESS_CAPACITY: ${RJ_ACCESS_CAPACITY:-10}
       RJ_ACCESS_SESSION_MINUTES: ${RJ_ACCESS_SESSION_MINUTES:-60}
-      RJ_ACCESS_COOLDOWN_MINUTES: ${RJ_ACCESS_COOLDOWN_MINUTES:-20}
       RJ_ACCESS_IDLE_MINUTES: ${RJ_ACCESS_IDLE_MINUTES:-2}
       # Credits a confirmed account starts with.
       RJ_SIGNUP_CREDITS: ${RJ_SIGNUP_CREDITS:-100}
@@ -91,6 +90,11 @@ services:
       # reach the app at rather than anything derived from a request.
       RJ_PUBLIC_URL: ${RJ_PUBLIC_URL:-http://localhost:28610}
       RJ_REQUIRE_VERIFIED_EMAIL: ${RJ_REQUIRE_VERIFIED_EMAIL:-true}
+      # Named here or it does not exist: compose reads .env to interpolate this file, not to
+      # populate containers. install.sh writes this, and without this line it was written and
+      # then dropped -- leaving the session cookie unmarked and every per-address limit
+      # measuring Caddy instead of the client.
+      RJ_TRUST_PROXY: ${RJ_TRUST_PROXY:-false}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SECURE: ${SMTP_SECURE:-}
