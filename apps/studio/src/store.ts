@@ -64,6 +64,14 @@ interface StudioState {
    */
   soundOn: boolean;
 
+  /**
+   * A transient message, or null.
+   *
+   * One at a time on purpose: a stack of toasts is a stack of things to dismiss, and the second
+   * one is almost always less interesting than the first. A newer message replaces an older one.
+   */
+  notice: { message: string; severity: 'success' | 'info' | 'warning' | 'error'; at: number } | null;
+
   /** Signed-in user, or null. Undefined until the first check completes. */
   user: User | null | undefined;
   /** Id of the account-stored project this document came from, if any. */
@@ -149,6 +157,9 @@ interface StudioState {
    */
   setAgentFocus(id: string | null): void;
   setMode(mode: CanvasMode): void;
+  /** Say something briefly. `at` distinguishes two identical messages so the second still shows. */
+  notify(message: string, severity?: 'success' | 'info' | 'warning' | 'error'): void;
+  dismissNotice(): void;
   setCompile(status: CompileStatus, diagnostics: Diagnostic[], hex: string | null): void;
   setBuildError(message: string | null): void;
 }
@@ -188,6 +199,7 @@ export const useStudio = create<StudioState>((set, get) => ({
   future: [],
   snapshot: EMPTY_SNAPSHOT,
   soundOn: true,
+  notice: null,
   selectedIds: [],
   agentFocus: null,
   mode: { kind: 'select' },
@@ -449,6 +461,9 @@ export const useStudio = create<StudioState>((set, get) => ({
     }),
   setAgentFocus: (agentFocus) => set({ agentFocus }),
   setMode: (mode) => set({ mode }),
+  notify: (message, severity = 'info') =>
+    set({ notice: { message, severity, at: Date.now() } }),
+  dismissNotice: () => set({ notice: null }),
   setCompile: (compileStatus, diagnostics, hex) =>
     set({ compileStatus, diagnostics, hex, buildError: null }),
   setBuildError: (buildError) => set({ buildError, compileStatus: 'error', hex: null }),

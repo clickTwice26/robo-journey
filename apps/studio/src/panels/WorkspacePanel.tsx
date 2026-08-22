@@ -26,14 +26,22 @@ import LinkOffIcon from '@mui/icons-material/LinkOff';
 import Rotate90DegreesCwIcon from '@mui/icons-material/Rotate90DegreesCw';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Workspace, type CanvasControls } from '../canvas/Workspace.tsx';
+import { CanvasEmptyState } from './CanvasEmptyState.tsx';
 import { useStudio } from '../store.ts';
 
-export function WorkspacePanel() {
+export function WorkspacePanel({
+  onOpenLibrary,
+  onAskAi,
+}: {
+  onOpenLibrary?: () => void;
+  onAskAi?: () => void;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const controlsRef = useRef<CanvasControls | null>(null);
   const [menu, setMenu] = useState<{ partId: string; x: number; y: number } | null>(null);
   const removePart = useStudio((s) => s.removePart);
+  const partCount = useStudio((s) => s.project.parts.length);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -92,6 +100,10 @@ export function WorkspacePanel() {
         />
       )}
 
+
+      {partCount === 0 && onOpenLibrary && onAskAi && (
+        <CanvasEmptyState onOpenLibrary={onOpenLibrary} onAskAi={onAskAi} />
+      )}
 
       <Menu
         open={menu !== null}

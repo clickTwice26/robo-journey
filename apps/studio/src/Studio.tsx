@@ -37,6 +37,7 @@ import { DatasheetDialog } from './panels/DatasheetDialog.tsx';
 import { CloudProjectsDialog } from './panels/CloudProjectsDialog.tsx';
 import { LibraryDialog } from './panels/LibraryDialog.tsx';
 import { HelpDialog, type HelpTopic } from './panels/HelpDialog.tsx';
+import { Notices } from './panels/Notices.tsx';
 import { InviteDialog } from './panels/InviteDialog.tsx';
 import { UpgradeDialog } from './panels/UpgradeDialog.tsx';
 import { useBuzzerAudio } from './sim/useAudio.ts';
@@ -155,7 +156,25 @@ export function Studio({ gate, theme }: { gate: Gate; theme: ThemeControl }) {
   // scope; memoised on the controller, which `useSimulation` keeps referentially stable.
   const components = useMemo(
     () => ({
-      workspace: (_props: IDockviewPanelProps) => <WorkspacePanel />,
+      workspace: (_props: IDockviewPanelProps) => (
+        <WorkspacePanel
+          onOpenLibrary={() => setLibraryOpen(true)}
+          // Through the ref rather than the memoised value: `menuActions` is null on the first
+          // render, and capturing that null here would leave the button permanently inert.
+          onAskAi={() => {
+            const api = apiRef.current;
+            const existing = api?.getPanel('assistant');
+            if (existing) existing.api.setActive();
+            else
+              api?.addPanel({
+                id: 'assistant',
+                component: 'assistant',
+                title: PANEL_TITLES.get('assistant') ?? 'Assistant',
+                position: { referencePanel: 'editor', direction: 'within' },
+              });
+          }}
+        />
+      ),
       editor: (_props: IDockviewPanelProps) => <EditorPanel />,
       serial: (_props: IDockviewPanelProps) => <SerialPanel />,
       problems: (_props: IDockviewPanelProps) => <ProblemsPanel />,
@@ -358,6 +377,7 @@ export function Studio({ gate, theme }: { gate: Gate; theme: ThemeControl }) {
         onClose={() => setLibraryOpen(false)}
       />
       <HelpDialog topic={helpTopic} onClose={() => setHelpTopic(null)} />
+      <Notices />
       <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} />
       <UpgradeDialog open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
     </>

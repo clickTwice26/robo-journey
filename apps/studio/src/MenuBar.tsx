@@ -26,6 +26,7 @@ import {
   Typography,
 } from '@mui/material';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import SearchIcon from '@mui/icons-material/Search';
 import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import ZoomOutIcon from '@mui/icons-material/ZoomOut';
 import FitScreenIcon from '@mui/icons-material/FitScreen';
@@ -65,6 +66,7 @@ import type { ThemeControl } from './useThemeMode.ts';
 import type { ThemePreference } from './theme.ts';
 import type { HelpTopic } from './panels/HelpDialog.tsx';
 import { MOD, isMac, shortcut } from './shortcuts.ts';
+import { CommandPalette, type Command } from './panels/CommandPalette.tsx';
 
 /**
  * What Cmd+C put aside, as ids rather than as copies of parts.
@@ -179,6 +181,7 @@ export function MenuBar({
   const syncError = useStudio((s) => s.syncError);
 
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const anchors = useRef<Record<string, HTMLElement | null>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -221,13 +224,23 @@ export function MenuBar({
       store.setCompile(result.ok ? 'ok' : 'error', result.diagnostics, result.hex ?? null);
       if (result.ok && result.hex) {
         sim.load(store.project, result.hex);
+        store.notify('Compiled. The sketch is on the board.', 'success');
         return true;
       }
+      // The diagnostics are already in the Problems panel; this is the nudge to look at it.
+      const errors = result.diagnostics.filter((d) => d.severity === 'error').length;
+      store.notify(
+        errors > 0
+          ? `${errors} compile ${errors === 1 ? 'error' : 'errors'} — see Problems.`
+          : 'The sketch did not compile — see Problems.',
+        'error',
+      );
       return false;
     } catch (caught) {
-      store.setBuildError(
-        caught instanceof CompileUnavailableError ? caught.message : (caught as Error).message,
-      );
+      const message =
+        caught instanceof CompileUnavailableError ? caught.message : (caught as Error).message;
+      store.setBuildError(message);
+      store.notify(message, 'error');
       return false;
     }
   }, [sim]);
@@ -236,7 +249,11 @@ export function MenuBar({
     if (await build()) sim.start();
   }, [build, sim]);
 
-  const save = useCallback(() => downloadProject(useStudio.getState().project), []);
+  const save = useCallback(() => {
+    const store = useStudio.getState();
+    downloadProject(store.project);
+    store.notify(`Saved ${store.project.name}.rjp to your downloads.`, 'success');
+  }, []);
 
   /**
    * Save to the account.
@@ -257,8 +274,10 @@ export function MenuBar({
         store.setCloudProject(created.id);
       }
       store.setSyncState(new Date(), null);
+      store.notify(`Saved “${store.project.name}” to your account.`, 'success');
     } catch (caught) {
       store.setSyncState(store.syncedAt, (caught as Error).message);
+      store.notify(`Could not save to your account: ${(caught as Error).message}`, 'error');
     }
   }, []);
 
@@ -348,6 +367,12 @@ export function MenuBar({
         // The next four are the canvas's, and every one of them means something else inside a text
         // editor -- select all the code, copy the code. `isTyping()` above only guards the
         // unmodified keys, so the editor check has to be repeated here.
+        case 'k':
+          // Not guarded by isTyping: the point of a palette is that it opens from anywhere,
+          // including with the cursor in the editor. Nothing else binds Cmd+K here.
+          event.preventDefault();
+          setPaletteOpen((wasOpen) => !wasOpen);
+          break;
         case 'a':
           if (inEditor || isTyping()) return;
           event.preventDefault();
@@ -611,6 +636,42 @@ export function MenuBar({
    * this window is acting as, which is why every editor puts it opposite the
    * menus rather than in them. It keeps its dropdown; only its position moves.
    */
+  /**
+   * The menu bar, flattened into a searchable list.
+   *
+   * Derived rather than written out again: a hand-kept second list would be wrong the first time
+   * somebody adds a menu item and forgets this. Anything with a label and an action qualifies,
+   * so dividers, radio groups and headings drop out on their own.
+   */
+  const commands = useMemo<Command[]>(
+    () =>
+      menus.flatMap((menu) =>
+        menu.items.flatMap((item) => {
+          const entry = item as {
+            label?: string;
+            icon?: React.ReactNode;
+            hint?: string;
+            secondary?: string;
+            disabled?: boolean;
+            onClick?: () => void;
+          };
+          if (typeof entry.label !== 'string' || typeof entry.onClick !== 'function') return [];
+          return [
+            {
+              group: menu.label,
+              label: entry.label,
+              ...(entry.icon !== undefined ? { icon: entry.icon } : {}),
+              ...(entry.hint !== undefined ? { hint: entry.hint } : {}),
+              ...(entry.secondary !== undefined ? { secondary: entry.secondary } : {}),
+              ...(entry.disabled !== undefined ? { disabled: entry.disabled } : {}),
+              run: entry.onClick,
+            },
+          ];
+        }),
+      ),
+    [menus],
+  );
+
   const leftMenus = useMemo(() => menus.filter((menu) => menu.id !== 'account'), [menus]);
   const accountMenu = useMemo(() => menus.find((menu) => menu.id === 'account'), [menus]);
 
@@ -827,6 +888,35 @@ export function MenuBar({
 
         <Box sx={{ flex: 1 }} />
 
+        {/* Same reasoning as the Ask AI button beside it: a shortcut nobody can see is a shortcut
+            nobody uses. The chip is the discoverability, the keystroke is the speed. */}
+        <Tooltip title="Search every command and part">
+          <Button
+            size="small"
+            color="inherit"
+            startIcon={<SearchIcon />}
+            onClick={() => setPaletteOpen(true)}
+            sx={{ mr: 0.5, color: 'text.secondary', textTransform: 'none' }}
+          >
+            Search
+            <Box
+              component="span"
+              sx={{
+                ml: 1,
+                px: 0.6,
+                py: 0.1,
+                fontSize: 10,
+                borderRadius: 0.75,
+                border: 1,
+                borderColor: 'divider',
+                color: 'text.disabled',
+              }}
+            >
+              {MOD}K
+            </Box>
+          </Button>
+        </Tooltip>
+
         {/* The assistant is otherwise a tab behind the editor, which is a poor place for the one
             feature nobody knows is there. A button says it exists. */}
         <Tooltip title="Ask about the circuit on screen. It can see your parts, wiring, sketch and faults.">
@@ -852,6 +942,12 @@ export function MenuBar({
         )}
         {error && <Chip size="small" color="error" label={error} onDelete={() => setError(null)} />}
       </Toolbar>
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        commands={commands}
+      />
     </AppBar>
   );
 }
