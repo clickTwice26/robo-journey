@@ -41,10 +41,40 @@ changes in it -- someone editing a config on the server is a person, not a merge
 | `--dir <path>` | Where the checkout goes. Default `/opt/robo-journey`. |
 | `--repo <url>` | Clone from somewhere else, such as your own fork, or an SSH URL for a private one. |
 | `--branch <ref>` | Branch or tag. Default `master`. |
+| `--env-file <path>` | A `.env` to take settings from. Default: `./.env`, if there is one where you ran the command. |
+| `--no-env-file` | Ignore `./.env` even if one is sitting there. |
 | `--dry-run` | Decide everything, change nothing. Over an existing install it reads *that* install and reports the update it would make. |
 
 Everything it does not recognise is passed through to the installer, so the flags in the next
 section work here too.
+
+### Bringing your own settings
+
+The checkout does not exist yet when the one-liner starts, so there is nowhere for a `.env` to be
+except the directory you are standing in. If there is one there, it is used:
+
+```bash
+cd /root/robo-journey-config     # holds a .env with your SMTP, GEMINI_API_KEY, and so on
+curl -fsSL https://raw.githubusercontent.com/clickTwice26/robo-journey/master/deploy/bootstrap.sh | sudo bash -s -- --domain sim.example.com --email you@example.com
+```
+
+The values are **merged into the checkout's own `.env` key by key**, not copied over the top. That
+distinction is the whole design:
+
+- A key you set wins.
+- A key you do not mention keeps whatever is already there. This is what protects
+  `POSTGRES_PASSWORD` on the second run — Postgres built its data directory around the one
+  generated the first time, and a wholesale copy from a file that never mentioned it would
+  generate a new one and leave a database nothing could open.
+- A key present with no value is skipped, on the reading that an empty line means "I did not set
+  this" rather than "make this empty".
+
+So the file only needs the settings you actually care about. Everything else is asked for, or
+generated, or left alone.
+
+The file it ends up in is always `<checkout>/.env` — `/opt/robo-journey/.env` by default. That is
+where Compose reads it from, and it stays the source of truth afterwards; your original is read
+once and not touched.
 
 **It installs what is on GitHub, not what is on your laptop.** Push first, or point it at a branch
 with `--branch`.
@@ -73,6 +103,7 @@ while anything derived from the domain is rewritten, so changing the domain work
 |---|---|
 | `--domain <host>` | The name people will use. Without one it runs on loopback with no certificate. |
 | `--email <address>` | Where Let's Encrypt sends expiry warnings. |
+| `--env-file <path>` | A `.env` to take settings from, merged into the checkout's own key by key. |
 | `--app-port <port>` | Where the app listens on loopback. Default 28610; it picks another if that is taken. |
 | `--behind-proxy` | Skip the check and always configure for an existing proxy. |
 | `--dry-run` | Decide everything, change nothing. |

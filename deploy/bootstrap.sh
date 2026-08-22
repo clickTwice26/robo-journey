@@ -11,6 +11,10 @@
 #   less bootstrap.sh
 #   sudo bash bootstrap.sh --domain sim.example.com --email you@example.com
 #
+# If there is a .env in the directory you run this from, it is used. The checkout does not exist
+# yet at that point, so the directory you are standing in is the only place one could be; its
+# values are merged into the checkout's .env key by key, and `--no-env-file` opts out.
+#
 # This script does three things and then gets out of the way: makes sure git and docker are here,
 # clones the repository, and hands over to `deploy/install.sh`, which is where all the real
 # decisions live -- what is already listening on 80 and 443, whether the domain resolves here,
@@ -31,6 +35,13 @@ TARGET="/opt/robo-journey"
 ASSUME_YES="no"
 DRY_RUN="no"
 INSTALL_ARGS=()
+
+# Where the operator was standing when they ran this, captured before anything cd's anywhere. A
+# .env here is theirs and is the whole reason to look: the checkout does not exist yet, so there is
+# nowhere else for one to be.
+INVOKED_FROM="$PWD"
+ENV_SOURCE=""
+USE_LOCAL_ENV="yes"
 
 # --- Saying things ------------------------------------------------------------------------------
 
@@ -66,6 +77,8 @@ robo-journey bootstrap -- clone and install on a fresh machine
   --dir <path>        where to put the checkout (default $TARGET)
   --repo <url>        clone from somewhere else, e.g. your own fork
   --branch <ref>      branch or tag to check out (default $BRANCH)
+  --env-file <path>   a .env to take settings from (default: ./.env, if there is one)
+  --no-env-file       ignore ./.env even if one is sitting here
   --dry-run           work everything out in a temporary clone and change nothing
   --yes               take every default and install docker if it is missing, without asking
   --help
@@ -83,6 +96,8 @@ while [[ $# -gt 0 ]]; do
     --dir) TARGET="${2:-}"; shift 2 ;;
     --repo) REPO_URL="${2:-}"; shift 2 ;;
     --branch) BRANCH="${2:-}"; shift 2 ;;
+    --env-file) ENV_SOURCE="${2:-}"; shift 2 ;;
+    --no-env-file) USE_LOCAL_ENV="no"; shift ;;
     --dry-run) DRY_RUN="yes"; INSTALL_ARGS+=(--dry-run); shift ;;
     --yes|-y) ASSUME_YES="yes"; INSTALL_ARGS+=(--yes); shift ;;
     --help|-h) usage; exit 0 ;;
@@ -91,9 +106,30 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# --- The settings they brought ---------------------------------------------------------------------
+
+if [[ -z "$ENV_SOURCE" && "$USE_LOCAL_ENV" == "yes" && -f "$INVOKED_FROM/.env" ]]; then
+  ENV_SOURCE="$INVOKED_FROM/.env"
+fi
+
+if [[ -n "$ENV_SOURCE" ]]; then
+  [[ -f "$ENV_SOURCE" ]] || die "no such file: $ENV_SOURCE"
+  # Absolute, because the installer runs from the checkout and a relative path would resolve
+  # against the wrong directory by then.
+  ENV_SOURCE="$(cd -- "$(dirname -- "$ENV_SOURCE")" && pwd)/$(basename -- "$ENV_SOURCE")"
+  INSTALL_ARGS+=(--env-file "$ENV_SOURCE")
+fi
+
 # --- What this machine has ----------------------------------------------------------------------
 
 step "Checking this machine"
+
+if [[ -n "$ENV_SOURCE" ]]; then
+  good "settings from $ENV_SOURCE"
+  note "merged into the checkout's .env key by key; anything generated there is kept"
+else
+  note "no .env here — the installer will ask for what it needs"
+fi
 
 # Linux servers only, and worth saying before this starts installing packages on something it was
 # never meant to touch.

@@ -38,6 +38,7 @@ APP_PORT="28610"
 ASSUME_YES="no"
 FORCE_BEHIND="no"
 DRY_RUN="no"
+SEED_ENV=""
 
 # --- Saying things ------------------------------------------------------------------------------
 
@@ -100,6 +101,7 @@ robo-journey installer
 
   --domain <host>     the name people will use, e.g. sim.example.com
   --email <address>   for certificate expiry warnings (optional but wise)
+  --env-file <path>   a .env to take settings from, merged into the checkout's own
   --app-port <port>   where the app listens on loopback (default 28610)
   --behind-proxy      skip the port check and always configure for an existing proxy
   --dry-run           work everything out and write nothing; shows what would happen
@@ -113,6 +115,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --domain) DOMAIN="${2:-}"; shift 2 ;;
     --email) ACME_EMAIL="${2:-}"; shift 2 ;;
+    --env-file) SEED_ENV="${2:-}"; shift 2 ;;
     --app-port) APP_PORT="${2:-}"; shift 2 ;;
     --behind-proxy) FORCE_BEHIND="yes"; shift ;;
     --dry-run) DRY_RUN="yes"; shift ;;
@@ -314,6 +317,35 @@ set_env() {
   printf '%s=%s\n' "$key" "$value" >>"$ENV_FILE"
 }
 
+# Take the settings out of a .env the operator brought with them.
+#
+# Merged key by key rather than copied over the top. The file in the checkout may already hold
+# things this script generated on an earlier run -- POSTGRES_PASSWORD above all, which Postgres has
+# since built a data directory around. Copying a file that lacks it would regenerate it, and the
+# next start would be a service that cannot open its own database.
+#
+# A key present with no value is skipped. It reads as "I did not set this", and letting it win
+# would blank a setting that is working.
+seed_from() {
+  local src="$1" line key value taken=0 skipped=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"          # leading whitespace
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" != *=* ]] && continue
+    key="${line%%=*}"; key="${key#export }"
+    value="${line#*=}"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    if [[ -z "$value" ]]; then skipped=$((skipped + 1)); continue; fi
+    set_env "$key" "$value"
+    taken=$((taken + 1))
+  done <"$src"
+  good "took $taken setting(s) from $src"
+  if [[ $skipped -gt 0 ]]; then
+    note "$skipped key(s) there had no value and were left as they already are."
+  fi
+  return 0
+}
+
 if [[ "$ENV_EXISTED" == "yes" ]]; then
   good ".env exists — secrets in it will be kept"
 else
@@ -322,6 +354,17 @@ else
   good "created .env"
 fi
 chmod 600 "$ENV_FILE" 2>/dev/null || true
+
+# Before anything is generated, so a password brought along wins over a fresh one rather than
+# losing to it.
+if [[ -n "$SEED_ENV" ]]; then
+  [[ -f "$SEED_ENV" ]] || die "no such file: $SEED_ENV"
+  if [[ "$(cd "$(dirname "$SEED_ENV")" && pwd)/$(basename "$SEED_ENV")" == "$ENV_FILE" ]]; then
+    note "--env-file is the checkout's own .env; nothing to merge"
+  else
+    seed_from "$SEED_ENV"
+  fi
+fi
 
 # Generated once and never again: regenerating this on a second run would leave the app unable to
 # open the database it created on the first.
