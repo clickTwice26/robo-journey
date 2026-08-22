@@ -373,6 +373,17 @@ export function ResistorShape({ part, selected }: ShapeProps) {
 export function ButtonShape({ part, selected }: ShapeProps) {
   const size = mm(2 * PITCH_MM);
   const pressed = part.props.pressed === true;
+  // The four legs, at the corners of a 0.2" square. Read off the definition rather than written
+  // out here, so the artwork cannot drift from what the simulator wires up -- this shape drew no
+  // legs at all, which made a tactile switch the one part on the canvas you could not see how to
+  // wire.
+  const pins = (() => {
+    try {
+      return partDefinition(part.type).pins;
+    } catch {
+      return [];
+    }
+  })();
 
   return (
     <Group>
@@ -386,6 +397,22 @@ export function ButtonShape({ part, selected }: ShapeProps) {
         stroke={selected ? canvas.selection : '#00000044'}
         strokeWidth={selected ? 2 : 0.5}
       />
+
+      {/* Under the cap, so a leg reads as coming out from beneath the body. */}
+      {pins.map((pin) => (
+        <Group key={pin.name} listening={false}>
+          <Rect
+            x={mm(pin.x) - 2.4}
+            y={mm(pin.y) - 2.4}
+            width={4.8}
+            height={4.8}
+            fill="#0a0c0f"
+            cornerRadius={0.8}
+          />
+          <Circle x={mm(pin.x)} y={mm(pin.y)} radius={1.5} fill={canvas.pinBrass} />
+        </Group>
+      ))}
+
       <Circle
         x={size / 2}
         y={size / 2}

@@ -71,7 +71,6 @@ erDiagram
     access_state state
     bigint queue_seq
     timestamptz expires_at
-    timestamptz cooldown_until
     timestamptz last_seen_at
     bigint carry_ms
   }

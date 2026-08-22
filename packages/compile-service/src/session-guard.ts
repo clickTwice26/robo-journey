@@ -4,14 +4,14 @@
  * Authentication and access are separate questions and both have to be asked. A session cookie
  * says who the caller is; a seat says whether they may use the simulator at this moment. Someone
  * whose hour has run out is still perfectly well authenticated -- they simply cannot compile
- * anything until the cooldown has passed.
+ * anything until it has a seat again.
  *
  * Which guard a route uses is a real decision, not a formality:
  *
  *   - Compiling and datasheet extraction need a seat. They are the tool, and they are what the
  *     ten-at-a-time limit exists to ration.
  *   - Reading and writing projects need only a session. Someone's hour ending must not take their
- *     unsaved circuit with it, so storage stays reachable through the cooldown.
+ *     unsaved circuit with it, so storage stays reachable while waiting for a seat.
  */
 import type { FastifyReply, FastifyRequest } from 'fastify';
 // Imported for its declaration merging, which is what puts `cookies` on the request and
@@ -61,11 +61,9 @@ export function createGuards(store: AccountStore): Guards {
     // position or the countdown without a second round trip.
     void reply.status(403).send({
       error:
-        status.state === 'cooldown'
-          ? 'Your session has ended. You can join the queue again once the cooldown is over.'
-          : status.state === 'queued'
-            ? 'You are still in the queue.'
-            : 'You do not have an active session. Join the queue to get one.',
+        status.state === 'queued'
+          ? 'You are still in the queue.'
+          : 'You do not have an active session. Ask for one to take a free seat, or join the queue.',
       access: status,
     });
     return null;

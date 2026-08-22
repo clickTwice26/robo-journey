@@ -100,8 +100,6 @@ export async function createServer(options: CreateServerOptions = {}): Promise<S
   const store = new AccountStore(pool, {
     capacity: config.RJ_ACCESS_CAPACITY,
     sessionMs: config.RJ_ACCESS_SESSION_MINUTES * 60 * 1000,
-    minCooldownMs: config.RJ_ACCESS_COOLDOWN_MIN_MINUTES * 60 * 1000,
-    maxCooldownMs: config.RJ_ACCESS_COOLDOWN_MAX_MINUTES * 60 * 1000,
     idleMs: config.RJ_ACCESS_IDLE_MINUTES * 60 * 1000,
     ...(options.access?.now ? { now: options.access.now } : {}),
   });

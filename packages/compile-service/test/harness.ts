@@ -33,7 +33,6 @@ export interface Message {
 export interface TestServerOptions {
   readonly capacity?: number;
   readonly sessionMinutes?: number;
-  readonly cooldownMinutes?: number;
   readonly idleMinutes?: number;
   /** Off by default so the suites that predate verification are unaffected by it. */
   readonly requireVerifiedEmail?: boolean;
@@ -53,7 +52,6 @@ function testConfig(backends: TestBackends, options: TestServerOptions): Config 
     LOG_LEVEL: 'silent',
     RJ_ACCESS_CAPACITY: String(options.capacity ?? 2),
     RJ_ACCESS_SESSION_MINUTES: String(options.sessionMinutes ?? 60),
-    RJ_ACCESS_COOLDOWN_MINUTES: String(options.cooldownMinutes ?? 20),
     RJ_ACCESS_IDLE_MINUTES: String(options.idleMinutes ?? 2),
     RJ_REQUIRE_VERIFIED_EMAIL: options.requireVerifiedEmail ? 'true' : 'false',
     RJ_PUBLIC_URL: 'https://studio.example.test',

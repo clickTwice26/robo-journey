@@ -48,7 +48,7 @@ export interface PublicUser {
    *
    * Exposed because the interface has to act on it -- an unverified account can sign in and see
    * where it stands, and cannot take a seat. Accounts are free, so without this the per-account
-   * cooldown means nothing: anyone wanting a permanent seat registers ten accounts.
+   * per-account limit means nothing: anyone wanting a permanent seat registers ten accounts.
    */
   readonly emailVerified: boolean;
 }

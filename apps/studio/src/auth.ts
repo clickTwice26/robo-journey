@@ -23,11 +23,10 @@ export interface User {
  * might be are all absent on purpose -- see the note on the server's own type.
  */
 export interface AccessStatus {
-  readonly state: 'idle' | 'queued' | 'active' | 'cooldown';
+  readonly state: 'idle' | 'queued' | 'active';
   readonly position: number | null;
   readonly waiting: number;
   readonly expiresAt: string | null;
-  readonly cooldownUntil: string | null;
   /** Why the last seat ended, so the queue screen can explain itself. */
   readonly lastReason: 'idle' | 'expired' | null;
   /** Time still owed from an interrupted session, carried back on re-admission. */
@@ -288,7 +287,7 @@ export async function redeemInvite(code: string): Promise<InviteState> {
 
 // --- Access -------------------------------------------------------------------------------------
 
-/** Ask for a seat, or rejoin the queue after a cooldown. */
+/** Take a free seat, or join the back of the queue. */
 export async function requestAccess(): Promise<AccessStatus> {
   const { access } = await call<{ access: AccessStatus }>('/access', { method: 'POST' });
   return access;

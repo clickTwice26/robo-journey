@@ -41,16 +41,6 @@ const Env = z.object({
   /** Capacity policy. Ten at once, an hour each. */
   RJ_ACCESS_CAPACITY: z.coerce.number().int().positive().max(1000).default(10),
   RJ_ACCESS_SESSION_MINUTES: z.coerce.number().positive().default(60),
-  /**
-   * Bounds on the wait between turns, not a fixed figure.
-   *
-   * The actual wait is worked out from how many people are queuing when a seat is given up: the
-   * minimum when nobody is waiting, rising toward the maximum as the queue lengthens. A cooldown
-   * exists to stop one person cycling through a seat forever, and that only matters when somebody
-   * else wants it.
-   */
-  RJ_ACCESS_COOLDOWN_MIN_MINUTES: z.coerce.number().positive().default(1),
-  RJ_ACCESS_COOLDOWN_MAX_MINUTES: z.coerce.number().positive().default(20),
   RJ_ACCESS_IDLE_MINUTES: z.coerce.number().positive().default(2),
 
   /**
@@ -95,7 +85,7 @@ const Env = z.object({
    * Whether an address has to be proved before an account can take a seat.
    *
    * On by default, and it is the reason the queue means anything: accounts are free, so a
-   * per-account cooldown is only a limit if accounts cost something to make. A mailbox is that
+   * per-account limit is only a limit if accounts cost something to make. A mailbox is that
    * cost.
    */
   RJ_REQUIRE_VERIFIED_EMAIL: z
@@ -245,7 +235,6 @@ export function describeConfig(config: Config): Record<string, unknown> {
     compiler: config.RJ_COMPILER_MODE,
     capacity: config.RJ_ACCESS_CAPACITY,
     sessionMinutes: config.RJ_ACCESS_SESSION_MINUTES,
-    cooldownMinutes: [config.RJ_ACCESS_COOLDOWN_MIN_MINUTES, config.RJ_ACCESS_COOLDOWN_MAX_MINUTES],
     idleMinutes: config.RJ_ACCESS_IDLE_MINUTES,
     // Whether it is set, never what it is.
     datasheetExtraction: Boolean(config.GEMINI_API_KEY),

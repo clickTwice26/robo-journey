@@ -85,19 +85,11 @@ const NUDGES: Record<string, { x: number; y: number }> = {
   ArrowDown: { x: 0, y: 1 },
 };
 
-export function Workspace({ width, height, onControls, onPartContextMenu, onPartHover }: Props & {
+export function Workspace({ width, height, onControls, onPartContextMenu }: Props & {
   /** Hands zoom controls back to the hosting panel, which renders them over the canvas. */
   onControls?: (controls: CanvasControls) => void;
   /** Right-click on a part, in page coordinates, so the panel can open a DOM menu there. */
   onPartContextMenu?: (event: { partId: string; x: number; y: number }) => void;
-  /**
-   * The part under the pointer, in page coordinates, or null when the pointer leaves it.
-   *
-   * Reported rather than drawn, for the same reason the context menu is: the canvas draws a
-   * footprint to scale, and what people want on hover is a photograph and a paragraph, which are
-   * DOM and belong to the panel.
-   */
-  onPartHover?: (event: { partId: string; x: number; y: number } | null) => void;
 }) {
   const project = useStudio((s) => s.project);
   const snapshot = useStudio((s) => s.snapshot);
@@ -625,14 +617,7 @@ export function Workspace({ width, height, onControls, onPartContextMenu, onPart
                   y: e.evt.clientY,
                 });
               }}
-              onMouseEnter={(e) => {
-                onPartHover?.({ partId: part.id, x: e.evt.clientX, y: e.evt.clientY });
-              }}
-              onMouseLeave={() => onPartHover?.(null)}
-              // A card left hanging beside a part that is no longer there reads as a rendering
-              // fault, so anything that moves the part out from under the pointer dismisses it.
               onDragStart={() => {
-                onPartHover?.(null);
                 // Dragging an unselected part selects it first, so what moves is always what is
                 // highlighted. Dragging one *of* a selection keeps the selection and moves it all.
                 if (!chosen.has(part.id)) setSelection(part.id);
@@ -649,7 +634,6 @@ export function Workspace({ width, height, onControls, onPartContextMenu, onPart
                 });
               }}
               onDragEnd={(e) => {
-                onPartHover?.(null);
                 setGroupDrag(null);
                 // The group's position is its centre, so the corner -- which is what the project
                 // stores -- is half a part back from it.

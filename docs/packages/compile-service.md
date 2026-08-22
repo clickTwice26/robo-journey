@@ -75,22 +75,27 @@ view and the variable inspector.
 
 ## Seats
 
-Only so many people can compile at once. Rather than a fixed timeout, the wait is worked out from
-how many people are queuing at the moment a seat is given up.
+Only so many people can compile at once. Everyone else waits in line.
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Queued: POST /access
-  Queued --> Holding: a seat frees
-  Holding --> Holding: heartbeat
-  Holding --> [*]: release, or the heartbeat stops
-  Holding --> Cooling: your turn ends
-  Cooling --> Queued: only if someone else wants it
+  [*] --> Active: a seat is free
+  [*] --> Queued: they are all taken
+  Queued --> Active: a seat frees, longest wait first
+  Active --> Active: heartbeat
+  Active --> Queued: two minutes idle, carrying the rest of the hour
+  Active --> [*]: the hour ends, or they sign out
 ```
 
-An outstanding wait is **shortened** if the queue clears, never lengthened. The cooldown exists to
-stop one person cycling through the same seat forever, and it only bites when somebody else is
-waiting.
+**Asking is the only way in, and asking always goes to the back.** There is no holding period after
+an hour ends: the account simply has no seat, and may ask for another whenever it likes. What keeps
+that fair is the queue rather than a timer — someone whose hour just ended is not *in* the queue,
+so a freed seat goes to whoever has waited longest, and the only way to get one back immediately is
+for nobody else to want it. Holding somebody out while seats sit empty is friction with no
+beneficiary.
+
+Idleness is treated more gently than expiry: it sends someone to the back of the line **carrying
+the remainder of their hour**, so going quiet costs a place in the queue and gains nothing.
 
 ## Configuration
 

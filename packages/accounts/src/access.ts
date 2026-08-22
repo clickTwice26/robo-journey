@@ -3,40 +3,35 @@
  *
  * Distinct from authentication, and deliberately so. A session cookie answers "who are you"; a
  * seat answers "may you use the tool at this moment". Keeping them apart means an hour running out
- * does not throw away the identity -- nobody has to retype a password every hour -- while still
- * ending access completely until the cooldown has passed.
+ * does not throw away the identity -- nobody has to retype a password every hour.
  *
- * The rules:
+ * The rules, and there are only three:
  *
  *   - A fixed number of people at once. Everyone else waits in line, first come first served.
  *   - A seat lasts one hour from the moment it is taken, not from the moment it was asked for.
  *   - A seat has to be *used*. Two minutes with the tab in the background or nobody touching the
  *     keyboard or mouse and it passes to the next person in line.
- *   - However a seat ends for good -- the hour running out, signing out, closing the tab -- a
- *     cooldown follows before that account can queue again, and how long it is depends on how
- *     many people are waiting.
  *
- * That last part is the whole point of `cooldownFor`. A cooldown exists to stop one person cycling
- * through the same seat forever, and that only matters when somebody else wants it. Holding
- * someone out for twenty minutes while ten seats sit empty and nobody is queuing serves nobody: it
- * is friction with no beneficiary. So the wait is a minute when the place is quiet and grows with
- * the queue, and an outstanding cooldown is shortened as the queue drains -- nobody should be kept
- * out for a crowd that has since gone home.
+ * When a seat ends -- the hour running out, signing out, closing the tab -- the account simply
+ * goes back to having none. Asking again takes an empty seat if there is one, and joins the back
+ * of the queue if there is not. There is no holding period.
  *
- * A cooldown of *nothing* is still wrong, which is why the floor is a minute rather than zero:
- * without it whoever just finished retakes the seat in the same instant it frees, and someone
- * arriving a second later never sees it.
+ * The queue is what makes that fair, rather than a timer. Someone whose hour has just ended is not
+ * in the queue; they have to ask again, and asking puts them behind everyone already waiting. So a
+ * freed seat goes to whoever has waited longest, and the only way to get one back immediately is
+ * for nobody else to want it -- which is exactly when holding anybody out would be friction with
+ * no beneficiary.
  *
  * Being idle is treated differently, and more gently: it sends someone to the back of the queue
- * rather than into a cooldown, because they have not finished, they have simply stopped for a
+ * rather than out altogether, because they have not finished, they have simply stopped for a
  * moment. What stops that being a way to dodge the hour limit is that the *remaining* time is
  * carried with them -- coming back from the queue resumes the same hour rather than starting a
  * new one, so idling costs a place in line and nothing is gained by it.
  *
  * There is no background timer. Every request reconciles the whole picture first -- expiring what
- * is over, reclaiming what has been abandoned, clearing finished cooldowns, and admitting from the
- * front of the queue -- so the state is correct when it is read rather than correct on a schedule.
- * A server that has been asleep for a day comes back consistent on its first request.
+ * is over, reclaiming what has been abandoned, and admitting from the front of the queue -- so the
+ * state is correct when it is read rather than correct on a schedule. A server that has been
+ * asleep for a day comes back consistent on its first request.
  *
  * All of it runs inside one transaction holding an advisory lock. That is not belt-and-braces: two
  * service instances reconciling at the same moment would each see nine seats taken and each admit
@@ -50,22 +45,6 @@ import { LOCK_ACCESS_RECONCILE, withTransaction } from './db.js';
 export const ACCESS_CAPACITY = 10;
 /** How long a seat lasts once taken. */
 export const ACCESS_SESSION_MS = 60 * 60 * 1000;
-/**
- * The longest an account is ever held out after a seat ends.
- *
- * A ceiling, not a constant. See `cooldownFor`.
- */
-export const ACCESS_MAX_COOLDOWN_MS = 20 * 60 * 1000;
-
-/**
- * The shortest.
- *
- * Not zero, because a cooldown of nothing lets whoever just finished retake the seat in the same
- * instant it frees, and someone arriving a second later never sees it. A minute is long enough to
- * be a real window for somebody else and short enough not to feel like a punishment.
- */
-export const ACCESS_MIN_COOLDOWN_MS = 60 * 1000;
-
 /**
  * How long someone may hold a seat without using it.
  *
@@ -81,14 +60,14 @@ export const ACCESS_IDLE_MS = 2 * 60 * 1000;
  * Deliberately longer than the idle timeout, and the ordering is the point. A tab in the
  * background is still alive but has its timers throttled to about once a minute by the browser,
  * so a grace shorter than the idle window would sometimes reclaim it as *gone* -- with the
- * cooldown that carries -- when what actually happened is that someone looked at another tab for
+ * a lost turn that carries -- when what actually happened is that someone looked at another tab for
  * two minutes. With this ordering, a page that still exists is always handled by the idle rule,
  * and only a genuinely closed tab reaches this one.
  */
 export const ACCESS_GRACE_MS = 3 * 60 * 1000;
 
 /** Where an account stands. */
-export type AccessState = 'idle' | 'queued' | 'active' | 'cooldown';
+export type AccessState = 'idle' | 'queued' | 'active';
 
 /**
  * What a caller is told about where they stand.
@@ -108,8 +87,6 @@ export interface AccessStatus {
   readonly waiting: number;
   /** When the current seat ends, ISO. Null unless active. */
   readonly expiresAt: string | null;
-  /** When the cooldown ends, ISO. Null unless in cooldown. */
-  readonly cooldownUntil: string | null;
   /**
    * Why the last seat ended, when it did not simply run its course.
    *
@@ -125,10 +102,6 @@ export interface AccessStatus {
 export interface AccessConfig {
   readonly capacity?: number;
   readonly sessionMs?: number;
-  /** Ceiling on the cooldown, reached only when the queue is as long as the room is wide. */
-  readonly maxCooldownMs?: number;
-  /** Floor on the cooldown, applied when nobody is waiting. */
-  readonly minCooldownMs?: number;
   readonly idleMs?: number;
   readonly graceMs?: number;
   /**
@@ -141,37 +114,17 @@ export interface AccessConfig {
   readonly now?: () => number;
 }
 
-/** Seats taken and people waiting, which is all the cooldown depends on. */
-interface Demand {
-  readonly waiting: number;
-  readonly free: number;
-}
-
 interface AccessRow {
   state: AccessState;
   queue_seq: string | null;
   expires_at: Date | null;
-  cooldown_until: Date | null;
   carry_ms: string | null;
   last_reason: 'idle' | 'expired' | null;
-}
-
-/** Asking for a seat while still cooling down from the last one. */
-export class CooldownError extends Error {
-  constructor(
-    message: string,
-    readonly until: Date,
-  ) {
-    super(message);
-    this.name = 'CooldownError';
-  }
 }
 
 export class AccessController {
   readonly capacity: number;
   readonly sessionMs: number;
-  readonly maxCooldownMs: number;
-  readonly minCooldownMs: number;
   readonly idleMs: number;
   readonly graceMs: number;
   private readonly clock: (() => number) | undefined;
@@ -182,11 +135,6 @@ export class AccessController {
   ) {
     this.capacity = config.capacity ?? ACCESS_CAPACITY;
     this.sessionMs = config.sessionMs ?? ACCESS_SESSION_MS;
-    this.maxCooldownMs = config.maxCooldownMs ?? ACCESS_MAX_COOLDOWN_MS;
-    this.minCooldownMs = Math.min(
-      config.minCooldownMs ?? ACCESS_MIN_COOLDOWN_MS,
-      config.maxCooldownMs ?? ACCESS_MAX_COOLDOWN_MS,
-    );
     this.idleMs = config.idleMs ?? ACCESS_IDLE_MS;
     this.graceMs = config.graceMs ?? ACCESS_GRACE_MS;
     this.clock = config.now;
@@ -216,13 +164,6 @@ export class AccessController {
       if (current?.state === 'active' || current?.state === 'queued') {
         return this.read(client, userId);
       }
-      if (current?.state === 'cooldown' && current.cooldown_until) {
-        throw new CooldownError(
-          `Your last session ended. You can join the queue again at ${current.cooldown_until.toISOString()}.`,
-          current.cooldown_until,
-        );
-      }
-
       // Queued rather than active even when there is room, then admitted by the reconcile below.
       // One code path decides who gets a seat, so the capacity check cannot be got right in one
       // place and wrong in the other.
@@ -232,9 +173,9 @@ export class AccessController {
                  $2::timestamptz)
          ON CONFLICT (user_id) DO UPDATE SET
            state = 'queued', queue_seq = nextval('access_queue_seq'), queued_at = $2::timestamptz,
-           started_at = NULL, expires_at = NULL, cooldown_until = NULL,
+           started_at = NULL, expires_at = NULL,
            last_seen_at = $2::timestamptz, last_active_at = $2::timestamptz,
-           carry_ms = NULL, last_reason = NULL, cooldown_from = NULL`,
+           carry_ms = NULL, last_reason = NULL`,
         [userId, now],
       );
 
@@ -273,9 +214,10 @@ export class AccessController {
   /**
    * Give up a seat or a place in the queue.
    *
-   * Leaving a seat early starts the cooldown, exactly as running out of time does. Anything else
-   * would make the hour limit optional -- release at fifty-nine minutes, take it straight back.
-   * Leaving the queue carries no penalty: nothing was used.
+   * Either way the account simply ends up with no seat and no place in line. It may ask again
+   * straight away, and asking puts it behind anyone already waiting -- which is what stops a
+   * release-and-retake from jumping the queue. With nobody waiting there is nothing to jump, and
+   * taking the seat back is the right answer rather than a loophole.
    */
   async release(userId: string): Promise<AccessStatus> {
     return this.inLock(async (client, now) => {
@@ -283,19 +225,17 @@ export class AccessController {
       const current = await this.row(client, userId);
 
       if (current?.state === 'active') {
-        const wait = Math.round(this.cooldownFor(await this.demand(client)));
         await client.query(
-          `UPDATE access SET state = 'cooldown', cooldown_from = $2::timestamptz,
-             cooldown_until = $2::timestamptz + make_interval(secs => $3::bigint / 1000.0),
+          `UPDATE access SET state = 'idle',
              started_at = NULL, expires_at = NULL, queued_at = NULL, queue_seq = NULL,
              carry_ms = NULL, last_reason = 'expired'
            WHERE user_id = $1::uuid`,
-          [userId, now, wait],
+          [userId],
         );
       } else if (current?.state === 'queued') {
         await client.query(
           `UPDATE access SET state = 'idle', queued_at = NULL, queue_seq = NULL,
-             cooldown_until = NULL, carry_ms = NULL WHERE user_id = $1`,
+             carry_ms = NULL WHERE user_id = $1`,
           [userId],
         );
       }
@@ -308,35 +248,6 @@ export class AccessController {
   /** True when this account may use the simulator right now. The one check that gates the tool. */
   async isActive(userId: string): Promise<boolean> {
     return (await this.status(userId)).state === 'active';
-  }
-
-  /**
-   * How long to hold someone out, given how busy the place is.
-   *
-   * The floor when nothing is contended, rising toward the ceiling as the queue lengthens, and
-   * reaching it when as many people are waiting as there are seats. Linear rather than anything
-   * cleverer because the number has to be explainable to the person waiting: one more person in
-   * front of you is one more increment, and that is the whole of it.
-   */
-  cooldownFor({ waiting, free }: Demand): number {
-    // Nobody waiting and somewhere to sit: there is nothing to protect, so this is only the window
-    // that stops the previous holder retaking the seat before anyone else can see it.
-    if (waiting === 0 && free > 0) return this.minCooldownMs;
-
-    const perWaiter = (this.maxCooldownMs - this.minCooldownMs) / Math.max(1, this.capacity);
-    return Math.min(this.maxCooldownMs, this.minCooldownMs + waiting * perWaiter);
-  }
-
-  /** Seats taken and people waiting, in one round trip. */
-  private async demand(client: PoolClient): Promise<Demand> {
-    const { rows } = await client.query<{ waiting: string; active: string }>(
-      `SELECT count(*) FILTER (WHERE state = 'queued') AS waiting,
-              count(*) FILTER (WHERE state = 'active') AS active
-         FROM access`,
-    );
-    const waiting = Number(rows[0]!.waiting);
-    const active = Number(rows[0]!.active);
-    return { waiting, free: Math.max(0, this.capacity - active) };
   }
 
   // --- Machinery ----------------------------------------------------------------------------------
@@ -363,25 +274,22 @@ export class AccessController {
    * Bring every row up to date and fill any free seats.
    *
    * Order matters and is not arbitrary. Expiry first, so a seat whose hour is up is not also
-   * considered for an idle bump. Then idleness, then cooldowns, and only then admission -- which
-   * has to see every seat freed by the steps above, or it would admit against a stale count.
+   * considered for an idle bump. Then idleness, then abandoned places in the queue, and only then
+   * admission -- which has to see every seat freed by the steps above, or it would admit against a
+   * stale count.
    */
   private async reconcile(client: PoolClient, now: Date): Promise<void> {
     const staleBefore = new Date(now.getTime() - this.graceMs);
     const idleBefore = new Date(now.getTime() - this.idleMs);
 
-    // How contended things were as this pass began, which is what anyone losing a seat in it is
-    // held out by.
-    const entering = this.cooldownFor(await this.demand(client));
-
-    // A seat whose hour is up, and a seat whose owner has vanished entirely, end the same way.
+    // A seat whose hour is up, and a seat whose owner has vanished entirely, end the same way:
+    // the account keeps its identity and loses its seat, free to ask for another whenever it likes.
     await client.query(
-      `UPDATE access SET state = 'cooldown', cooldown_from = $1::timestamptz,
-         cooldown_until = $1::timestamptz + make_interval(secs => $2::bigint / 1000.0),
+      `UPDATE access SET state = 'idle',
          started_at = NULL, expires_at = NULL, queued_at = NULL, queue_seq = NULL, carry_ms = NULL,
          last_reason = 'expired'
-       WHERE state = 'active' AND (expires_at <= $1::timestamptz OR last_seen_at < $3::timestamptz)`,
-      [now, Math.round(entering), staleBefore],
+       WHERE state = 'active' AND (expires_at <= $1::timestamptz OR last_seen_at < $2::timestamptz)`,
+      [now, staleBefore],
     );
 
     // A seat nobody is using goes to whoever is next, and its holder goes to the back of the line
@@ -404,35 +312,13 @@ export class AccessController {
       [now, idleBefore],
     );
 
-    // Someone who stopped waiting simply leaves the line. No cooldown: they never got a seat, and
-    // penalising them for giving up would be punishing the wrong thing.
+    // Someone who stopped waiting simply leaves the line.
     await client.query(
       `UPDATE access SET state = 'idle', queued_at = NULL, queue_seq = NULL
         WHERE state = 'queued' AND last_seen_at < $1::timestamptz`,
       [staleBefore],
     );
 
-    // Recalculated against how busy it is *now*, and only ever shortened. Someone who finished
-    // when twelve people were queuing should not still be waiting twenty minutes once the queue
-    // has emptied -- but nor should a cooldown grow because the place filled up after they left,
-    // which is what LEAST guarantees.
-    const current = Math.round(this.cooldownFor(await this.demand(client)));
-    await client.query(
-      `UPDATE access
-          SET cooldown_until = LEAST(
-                cooldown_until,
-                cooldown_from + make_interval(secs => $1::bigint / 1000.0)
-              )
-        WHERE state = 'cooldown' AND cooldown_from IS NOT NULL`,
-      [current],
-    );
-
-    await client.query(
-      `UPDATE access SET state = 'idle', cooldown_until = NULL, cooldown_from = NULL,
-         carry_ms = NULL
-        WHERE state = 'cooldown' AND cooldown_until <= $1::timestamptz`,
-      [now],
-    );
 
     // Fill whatever is free, longest wait first. A full hour for a new turn; whatever was left of
     // the old one for someone coming back from an idle bump.
@@ -463,7 +349,7 @@ export class AccessController {
 
   private async row(client: PoolClient, userId: string): Promise<AccessRow | undefined> {
     const { rows } = await client.query<AccessRow>(
-      `SELECT state, queue_seq, expires_at, cooldown_until, carry_ms, last_reason
+      `SELECT state, queue_seq, expires_at, carry_ms, last_reason
          FROM access WHERE user_id = $1`,
       [userId],
     );
@@ -486,7 +372,7 @@ export class AccessController {
     };
 
     if (!row || row.state === 'idle') {
-      return { ...base, state: 'idle', position: null, expiresAt: null, cooldownUntil: null };
+      return { ...base, state: 'idle', position: null, expiresAt: null };
     }
     if (row.state === 'active') {
       return {
@@ -494,19 +380,8 @@ export class AccessController {
         state: 'active',
         position: null,
         expiresAt: row.expires_at?.toISOString() ?? null,
-        cooldownUntil: null,
       };
     }
-    if (row.state === 'cooldown') {
-      return {
-        ...base,
-        state: 'cooldown',
-        position: null,
-        expiresAt: null,
-        cooldownUntil: row.cooldown_until?.toISOString() ?? null,
-      };
-    }
-
     const { rows } = await client.query<{ n: string }>(
       `SELECT COUNT(*) AS n FROM access WHERE state = 'queued' AND queue_seq < $1`,
       [row.queue_seq],
@@ -516,7 +391,6 @@ export class AccessController {
       state: 'queued',
       position: Number(rows[0]!.n) + 1,
       expiresAt: null,
-      cooldownUntil: null,
     };
   }
 }

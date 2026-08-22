@@ -13,8 +13,8 @@
  * worth surviving a deploy. It is also worth losing without consequence, which is why it is here
  * and not in Postgres.
  *
- * Nothing that must survive a Redis restart lives here. Sessions, cooldowns and the queue are all
- * in Postgres, because losing a cooldown is a free hour and losing a seat mid-session is a bug
+ * Nothing that must survive a Redis restart lives here. Sessions, seats and the queue are all in
+ * Postgres, because losing a place in the queue is somebody else's turn and losing a seat is a bug
  * someone has to explain.
  */
 import { Redis, type RedisOptions } from 'ioredis';

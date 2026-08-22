@@ -1,12 +1,12 @@
 /**
  * Capacity control.
  *
- * The clock is injected, because none of this can be tested otherwise: an hour-long session, a
- * twenty minute cooldown and a ninety second heartbeat grace are the whole subject, and waiting
- * for them is not an option. Everything below moves time explicitly.
+ * The clock is injected, because none of this can be tested otherwise: an hour-long session and a
+ * ninety second heartbeat grace are the whole subject, and waiting for them is not an option.
+ * Everything below moves time explicitly.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AccountStore, CooldownError } from '../src/index.js';
+import { AccountStore } from '../src/index.js';
 import { createBackends, hasDatabase, type TestBackends } from '../../../test/database.js';
 
 const PASSWORD = 'correct-horse-battery-staple';
@@ -20,8 +20,6 @@ describeWithDb('access control', () => {
   /** Small capacity so the queue can be exercised without registering ten accounts each time. */
   const CAPACITY = 3;
   const SESSION_MS = 60 * 60 * 1000;
-  const MAX_COOLDOWN_MS = 20 * 60 * 1000;
-  const MIN_COOLDOWN_MS = 60 * 1000;
   const IDLE_MS = 2 * 60 * 1000;
   const GRACE_MS = 3 * 60 * 1000;
 
@@ -31,8 +29,6 @@ describeWithDb('access control', () => {
     store = new AccountStore(backends.pool, {
       capacity: CAPACITY,
       sessionMs: SESSION_MS,
-      maxCooldownMs: MAX_COOLDOWN_MS,
-      minCooldownMs: MIN_COOLDOWN_MS,
       idleMs: IDLE_MS,
       graceMs: GRACE_MS,
       // The clock is injected here and only here. In production the database's own clock is used,
@@ -164,44 +160,48 @@ describeWithDb('access control', () => {
       expect((await store.access.status(a!)).state).toBe('active');
 
       await advance(2000, a!);
-      expect((await store.access.status(a!)).state).toBe('cooldown');
+      expect((await store.access.status(a!)).state).toBe('idle');
     });
 
-    it('starts the cooldown', async () => {
+    it('says why, so the gate is not a mystery', async () => {
       const [a] = await users(1);
       await store.access.request(a!);
       await advance(SESSION_MS, a!);
-
-      // Nobody waiting and nine seats free, so this is the floor rather than the ceiling.
-      const status = await store.access.status(a!);
-      expect(status.cooldownUntil).toBe(new Date(clock + MIN_COOLDOWN_MS).toISOString());
+      expect((await store.access.status(a!)).lastReason).toBe('expired');
     });
 
-    it('refuses to re-queue during the cooldown', async () => {
+    it('lets them straight back in when nobody else wants the seat', async () => {
+      // The whole point of having no holding period: friction with no beneficiary is just friction.
       const [a] = await users(1);
       await store.access.request(a!);
       await advance(SESSION_MS, a!);
-
-      await expect(store.access.request(a!)).rejects.toThrow(CooldownError);
-      await advance(MIN_COOLDOWN_MS - 2000);
-      await expect(store.access.request(a!)).rejects.toThrow(CooldownError);
-    });
-
-    it('lets them back in once it has passed', async () => {
-      const [a] = await users(1);
-      await store.access.request(a!);
-      await advance(SESSION_MS, a!);
-      await advance(MAX_COOLDOWN_MS);
 
       expect((await store.access.status(a!)).state).toBe('idle');
       expect((await store.access.request(a!)).state).toBe('active');
+    });
+
+    it('puts them behind anyone already waiting, which is what keeps it fair', async () => {
+      // Three seats, all taken, with two more waiting. The first holder's hour ends and they ask
+      // again immediately -- they must not get the seat they just gave up.
+      const ids = await users(5);
+      for (const id of ids.slice(0, 3)) await store.access.request(id);
+      await store.access.request(ids[3]!);
+      await store.access.request(ids[4]!);
+
+      await advance(SESSION_MS, ...ids);
+      // Every seat expired together and the two waiting were admitted first.
+      expect((await store.access.status(ids[3]!)).state).toBe('active');
+      expect((await store.access.status(ids[4]!)).state).toBe('active');
+
+      const again = await store.access.request(ids[0]!);
+      expect(again.state).toBe('active');
+      expect((await store.access.status(ids[1]!)).state).toBe('idle');
     });
 
     it('gives them a fresh full hour, not the remains of the old one', async () => {
       const [a] = await users(1);
       await store.access.request(a!);
       await advance(SESSION_MS, a!);
-      await advance(MAX_COOLDOWN_MS);
 
       const status = await store.access.request(a!);
       expect(status.expiresAt).toBe(new Date(clock + SESSION_MS).toISOString());
@@ -245,15 +245,28 @@ describeWithDb('access control', () => {
       expect((await store.access.status(waiter)).state).toBe('active');
     });
 
-    it('still costs a cooldown', async () => {
-      // Without this the hour limit is optional: release at fifty-nine minutes, take it straight
-      // back, repeat forever.
+    it('gives the seat up, and lets it be taken again when nobody else wants it', async () => {
       const [a] = await users(1);
       await store.access.request(a!);
       await advance(SESSION_MS - 60 * 1000, a!);
 
-      expect((await store.access.release(a!)).state).toBe('cooldown');
-      await expect(store.access.request(a!)).rejects.toThrow(CooldownError);
+      expect((await store.access.release(a!)).state).toBe('idle');
+      expect((await store.access.request(a!)).state).toBe('active');
+    });
+
+    it('goes behind the queue on the way back, so releasing cannot jump it', async () => {
+      // This is what stops release-and-retake being a way around the hour: the seat you gave up
+      // goes to whoever was waiting, and you rejoin at the back.
+      const ids = await users(CAPACITY + 1);
+      for (const id of ids.slice(0, CAPACITY)) await store.access.request(id!);
+      const waiter = ids[CAPACITY]!;
+      await store.access.request(waiter);
+
+      await store.access.release(ids[0]!);
+      expect((await store.access.status(waiter)).state).toBe('active');
+
+      // Every seat is full again, so asking now means queuing rather than walking back in.
+      expect((await store.access.request(ids[0]!)).state).toBe('queued');
     });
 
     it('costs nothing when only giving up a place in the queue', async () => {
@@ -298,8 +311,9 @@ describeWithDb('access control', () => {
       await store.access.request(a!);
       await advance(GRACE_MS + 1000);
 
-      // Cooldown, not idle. Otherwise closing the tab and reopening it is a free hour, every hour.
-      expect((await store.access.status(a!)).state).toBe('cooldown');
+      // The seat is reclaimed for whoever wants it next. Reopening the tab and asking again is
+      // fine when nothing is contended, and goes to the back of the queue when it is.
+      expect((await store.access.status(a!)).state).toBe('idle');
     });
 
     it('drops someone who stopped waiting, without penalty', async () => {
@@ -355,8 +369,8 @@ describeWithDb('access control', () => {
       expect((await store.access.status(waiter)).state).toBe('active');
     });
 
-    it('sends them to the back of the line rather than into a cooldown', async () => {
-      // They have not had their turn, so a cooldown would be punishing the wrong thing. Losing
+    it('sends them to the back of the line rather than out altogether', async () => {
+      // They have not had their turn, so ending it would be punishing the wrong thing. Losing
       // their place is the whole penalty.
       const ids = (await users(CAPACITY + 1)).map((id) => id!);
       for (const id of ids.slice(0, CAPACITY)) await store.access.request(id);
@@ -456,123 +470,30 @@ describeWithDb('access control', () => {
       expect((await store.access.status(ids[0]!)).state).toBe('active');
     });
 
-    it('still cools down when the hour runs out while idle', async () => {
-      // Idleness sends you to the back of the line; a finished hour is finished either way. Checked
-      // just past the hour rather than well past it: with nobody waiting the cooldown is only a
-      // minute, so idling on through it would find them out the other side and prove nothing.
+    it('still ends the seat when the hour runs out while idle', async () => {
+      // Idleness sends you to the back of the line; a finished hour is finished either way, and
+      // finished means the seat is gone rather than merely surrendered for a moment.
       const [a] = (await users(1)).map((id) => id!);
       await store.access.request(a!);
       await advance(SESSION_MS - 30 * 1000, a!);
       await idleAway(31 * 1000, [a!]);
 
-      expect((await store.access.status(a!)).state).toBe('cooldown');
+      const status = await store.access.status(a!);
+      expect(status.state).toBe('idle');
+      expect(status.lastReason).toBe('expired');
     });
 
     it('treats a closed tab as leaving, not as idling', async () => {
-      // No heartbeat at all is someone who has gone, and going costs the cooldown. The grace is
-      // longer than the idle window so a page that still exists never lands here by accident.
+      // No heartbeat at all is someone who has gone, and the seat goes back to the pool. The
+      // grace is longer than the idle window so a page that still exists never lands here by
+      // accident.
       const [a] = (await users(1)).map((id) => id!);
       await store.access.request(a!);
       await advance(GRACE_MS + 1000);
-      expect((await store.access.status(a!)).state).toBe('cooldown');
+      expect((await store.access.status(a!)).state).toBe('idle');
     });
   });
 
-  describe('how long the cooldown is', () => {
-    /** Everyone in `ids` takes a seat and stays at the keyboard. */
-    const seat = async (ids: string[]) => {
-      for (const id of ids) await store.access.request(id);
-    };
-
-    it('is the floor when nobody is waiting', async () => {
-      // Holding someone out for twenty minutes while seats sit empty is friction with no
-      // beneficiary. The minute that remains is the window that stops them retaking the seat
-      // before anyone else can see it.
-      const [a] = (await users(1)).map((id) => id!);
-      await seat([a!]);
-      await advance(SESSION_MS, a!);
-
-      const status = await store.access.status(a!);
-      expect(new Date(status.cooldownUntil!).getTime() - clock).toBe(MIN_COOLDOWN_MS);
-    });
-
-    it('grows when the queue outlasts the seats that just freed', async () => {
-      // The queue has to be longer than the number of seats coming free, or everyone waiting is
-      // admitted by the same pass and there is nobody left to protect -- which is the floor case,
-      // correctly.
-      const ids = (await users(CAPACITY * 2 + 1)).map((id) => id!);
-      for (const id of ids) await store.access.request(id);
-
-      await advance(SESSION_MS, ...ids);
-      const wait = new Date((await store.access.status(ids[0]!)).cooldownUntil!).getTime() - clock;
-      expect(wait).toBeGreaterThan(MIN_COOLDOWN_MS);
-      expect(wait).toBeLessThanOrEqual(MAX_COOLDOWN_MS);
-    });
-
-    it('is the floor when the queue is short enough to be served at once', async () => {
-      // Everyone waiting gets a seat in the same pass, so nobody is left wanting one.
-      const ids = (await users(CAPACITY + 1)).map((id) => id!);
-      for (const id of ids) await store.access.request(id);
-
-      await advance(SESSION_MS, ...ids);
-      const wait = new Date((await store.access.status(ids[0]!)).cooldownUntil!).getTime() - clock;
-      expect(wait).toBe(MIN_COOLDOWN_MS);
-    });
-
-    it('never exceeds the ceiling, however long the queue', async () => {
-      const ids = (await users(CAPACITY * 3)).map((id) => id!);
-      for (const id of ids) await store.access.request(id);
-      await advance(SESSION_MS, ...ids);
-
-      const status = await store.access.status(ids[0]!);
-      expect(new Date(status.cooldownUntil!).getTime() - clock).toBeLessThanOrEqual(MAX_COOLDOWN_MS);
-    });
-
-    it('shortens as the queue drains', async () => {
-      // Somebody who finished while a crowd was waiting should not still be held out once the
-      // crowd has gone home.
-      const ids = (await users(CAPACITY * 4)).map((id) => id!);
-      for (const id of ids) await store.access.request(id);
-      await advance(SESSION_MS, ...ids);
-
-      const heldOut = ids[0]!;
-      const busy = new Date((await store.access.status(heldOut)).cooldownUntil!).getTime();
-      expect(busy - clock).toBeGreaterThan(MIN_COOLDOWN_MS);
-
-      // Everyone still queuing gives up.
-      for (const id of ids) {
-        if ((await store.access.status(id)).state === 'queued') await store.access.release(id);
-      }
-
-      const quiet = new Date((await store.access.status(heldOut)).cooldownUntil!).getTime();
-      expect(quiet).toBeLessThan(busy);
-    });
-
-    it('never lengthens once set', async () => {
-      // The reverse would mean the place filling up after you left costing you extra time, which
-      // is punishing somebody for someone else's arrival.
-      const ids = (await users(CAPACITY * 4)).map((id) => id!);
-      await seat(ids.slice(0, CAPACITY));
-      await advance(SESSION_MS, ...ids.slice(0, CAPACITY));
-
-      const finished = ids[0]!;
-      const before = new Date((await store.access.status(finished)).cooldownUntil!).getTime();
-
-      // A crowd turns up straight afterwards.
-      for (const id of ids.slice(CAPACITY)) await store.access.request(id);
-
-      const after = new Date((await store.access.status(finished)).cooldownUntil!).getTime();
-      expect(after).toBe(before);
-    });
-
-    it('computes the same figure the controller would', () => {
-      // The rule itself, stated once so the arithmetic is checkable without a database.
-      expect(store.access.cooldownFor({ waiting: 0, free: 3 })).toBe(MIN_COOLDOWN_MS);
-      expect(store.access.cooldownFor({ waiting: CAPACITY, free: 0 })).toBe(MAX_COOLDOWN_MS);
-      expect(store.access.cooldownFor({ waiting: 100, free: 0 })).toBe(MAX_COOLDOWN_MS);
-      expect(store.access.cooldownFor({ waiting: 1, free: 0 })).toBeGreaterThan(MIN_COOLDOWN_MS);
-    });
-  });
 
   it('gates the simulator on holding a seat', async () => {
     const [a] = await users(1);
@@ -598,12 +519,20 @@ describeWithDb('access control', () => {
     expect(status).not.toHaveProperty('estimatedWaitMs');
   });
 
-  it('defaults to ten seats, an hour, and twenty minutes', async () => {
+  it('defaults to ten seats and an hour each', async () => {
     const defaults = new AccountStore(backends.pool);
     expect(defaults.access.capacity).toBe(10);
     expect(defaults.access.sessionMs).toBe(60 * 60 * 1000);
-    expect(defaults.access.maxCooldownMs).toBe(20 * 60 * 1000);
-    expect(defaults.access.minCooldownMs).toBe(60 * 1000);
     expect(defaults.access.idleMs).toBe(2 * 60 * 1000);
+  });
+
+  it('never reports a state that no longer exists', async () => {
+    // 'cooldown' was a fourth state and is gone. Anything still producing one would be a row the
+    // migration missed, and the gate has no screen for it any more.
+    const [a] = await users(1);
+    await store.access.request(a!);
+    await advance(SESSION_MS, a!);
+    expect(['idle', 'queued', 'active']).toContain((await store.access.status(a!)).state);
+    expect(await store.access.status(a!)).not.toHaveProperty('cooldownUntil');
   });
 });

@@ -13,7 +13,6 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   AccountError,
   AccountStore,
-  CooldownError,
   EmailInUseError,
   InvalidCredentialsError,
   NotFoundError,
@@ -156,11 +155,10 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
   };
 
   /**
-   * Join the queue, tolerating a cooldown.
+   * Take a seat if one is free, or join the back of the queue.
    *
-   * Signing in during a cooldown is a perfectly ordinary thing to do -- someone comes back to see
-   * how long is left -- so it must not fail the sign-in. The status returned says where they
-   * stand either way.
+   * Part of signing in, so it must never fail the sign-in: the status it returns says where the
+   * account stands either way.
    */
   const requestOrReport = async (user: {
     id: string;
@@ -169,12 +167,7 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
     // An unverified account gets no seat, so it is not put in the queue either -- holding a place
     // in a line it cannot reach the front of would be a worse experience than being told why.
     if (requireVerifiedEmail && !user.emailVerified) return store.access.status(user.id);
-    try {
-      return await store.access.request(user.id);
-    } catch (error) {
-      if (error instanceof CooldownError) return store.access.status(user.id);
-      throw error;
-    }
+    return store.access.request(user.id);
   };
 
   const setSessionCookie = (request: FastifyRequest, reply: FastifyReply, token: string): void => {
@@ -466,17 +459,8 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
       });
     }
 
-    try {
-      return reply.send({ access: await store.access.request(user.id) });
-    } catch (error) {
-      if (error instanceof CooldownError) {
-        return reply
-          .status(429)
-          .header('Retry-After', Math.ceil((error.until.getTime() - Date.now()) / 1000))
-          .send({ error: error.message, access: await store.access.status(user.id) });
-      }
-      throw error;
-    }
+    // Nothing to refuse any more: asking either seats you or puts you at the back of the line.
+    return reply.send({ access: await store.access.request(user.id) });
   });
 
   /**

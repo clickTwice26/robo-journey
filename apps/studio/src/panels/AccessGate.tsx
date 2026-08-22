@@ -6,7 +6,7 @@
  * over a greyed-out canvas would suggest otherwise.
  *
  * The one rule the whole screen is built around is that people should never be surprised: the
- * cooldown counts down rather than saying "later", a seat passed on for idleness says so and says
+ * queue shows a position rather than saying "later", a seat passed on for idleness says so and says
  * the time is kept, and the fact that leaving early costs the same wait as running out of time is
  * stated up front rather than discovered afterwards.
  *
@@ -350,52 +350,27 @@ function Queued({ gate, access }: { gate: Gate; access: AccessStatus }) {
   );
 }
 
-function Cooldown({ gate, access }: { gate: Gate; access: AccessStatus }) {
-  const remaining = useCountdown(access.cooldownUntil);
-  const over = remaining !== null && remaining <= 0;
-
-  // Rejoin as soon as the clock runs out, without making anyone watch for the moment.
-  useEffect(() => {
-    if (over) void gate.join();
-  }, [over, gate]);
-
-  return (
-    <Shell>
-      <Stack spacing={2} sx={{ py: 1, alignItems: 'center' }}>
-        <AccessTimeIcon color="warning" sx={{ fontSize: 40 }} />
-        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-          Your hour is up
-        </Typography>
-        <Typography variant="h4" sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-          {remaining === null ? '—' : formatDuration(remaining)}
-        </Typography>
-        <Typography variant="body2" color="text.secondary" align="center">
-          There is a short wait between turns so everyone gets one — longer when people are
-          queuing, barely anything when they are not. You will rejoin automatically when it ends,
-          and if the queue clears in the meantime this gets shorter.
-        </Typography>
-        <Typography variant="caption" color="text.secondary" align="center">
-          Your circuits are saved. Nothing is lost.
-        </Typography>
-
-        <Button size="small" color="inherit" onClick={() => void gate.signOut()}>
-          Sign out
-        </Button>
-      </Stack>
-    </Shell>
-  );
-}
-
 function Idle({ gate }: { gate: Gate }) {
   const [busy, setBusy] = useState(false);
+  // Landing here straight after an hour is a different moment from arriving fresh, and saying
+  // nothing would leave someone wondering what just happened to their session.
+  const justEnded = gate.access?.lastReason === 'expired';
+  const waiting = gate.access?.waiting ?? 0;
 
   return (
     <Shell>
       <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
-        Ready when you are
+        {justEnded ? 'Your hour is up' : 'Ready when you are'}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Signed in as {gate.user?.email}. Take a seat to start building.
+        {justEnded
+          ? 'Your circuits are saved — nothing is lost. Start another session whenever you like.'
+          : `Signed in as ${gate.user?.email}. Take a seat to start building.`}
+      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+        {waiting > 0
+          ? `${waiting} ${waiting === 1 ? 'person is' : 'people are'} waiting, so this will join the queue behind them.`
+          : 'A seat is free, so this starts straight away.'}
       </Typography>
 
       {gate.error && (
@@ -722,8 +697,6 @@ export function AccessGate({ gate }: { gate: Gate }) {
       return <Unverified gate={gate} />;
     case 'queued':
       return <Queued gate={gate} access={gate.access!} />;
-    case 'cooldown':
-      return <Cooldown gate={gate} access={gate.access!} />;
     case 'idle':
       return <Idle gate={gate} />;
     default:

@@ -51,11 +51,11 @@ export type AccessPhase =
   | 'signed-out'
   /** Signed in, but the address has not been proved yet, so no seat can be taken. */
   | 'unverified'
-  /** Signed in with no seat and no cooldown -- can ask for one. */
+  /** Signed in with no seat -- can ask for one. */
   | 'idle'
   | 'queued'
   | 'active'
-  | 'cooldown';
+
 
 export interface AccessGate {
   readonly phase: AccessPhase;
@@ -71,7 +71,7 @@ export interface AccessGate {
   readonly idleWarningMs: number | null;
   /** Accept the result of a sign-in or registration. */
   adopt(user: User, access: AccessStatus | null): void;
-  /** Join the queue, or rejoin after a cooldown. */
+  /** Take a free seat, or join the back of the queue. */
   join(): Promise<void>;
   /** Give up the seat and sign out. */
   signOut(): Promise<void>;
@@ -222,7 +222,7 @@ export function useAccess(): AccessGate {
    *
    * It looks like an easy win -- hand the seat over the moment a tab closes instead of waiting for
    * the heartbeat to lapse -- and it is a trap. Neither `unload` nor `pagehide` can tell a close
-   * from a reload, and releasing a seat starts a cooldown, so pressing F5 would put someone out of
+   * from a reload, and releasing a seat gives it up, so pressing F5 would put someone out of
    * their own session. A seat occasionally sitting idle for a couple of minutes is a far smaller
    * cost than that, and the grace period exists to cover exactly this case. Signing out, which is
    * unambiguous, releases the seat properly.

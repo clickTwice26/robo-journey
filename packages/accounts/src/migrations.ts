@@ -204,6 +204,40 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX invite_redemptions_inviter ON invite_redemptions (inviter_id, created_at DESC);
     `,
   },
+  {
+    id: 7,
+    name: 'drop-cooldown',
+    sql: `
+      -- A seat that ends now leaves the account with nothing rather than holding it out for a
+      -- while. Asking again takes a free seat if there is one and joins the back of the queue if
+      -- there is not, which is what makes a release-and-retake fair without a timer to enforce it.
+
+      -- Anyone mid-cooldown when this runs is simply free, which is the new rule applied to them.
+      UPDATE access SET state = 'idle', cooldown_until = NULL, cooldown_from = NULL
+       WHERE state = 'cooldown';
+
+      -- Dropping the column takes its index with it.
+      ALTER TABLE access DROP COLUMN cooldown_until;
+      ALTER TABLE access DROP COLUMN cooldown_from;
+
+      -- The other two partial indexes have to go first and come back afterwards. Their predicates
+      -- hold enum literals, so the moment the column becomes TEXT they are comparing text with
+      -- access_state and the whole migration fails on an operator that does not exist.
+      DROP INDEX access_queue;
+      DROP INDEX access_active;
+
+      -- Postgres cannot remove a value from an enum, so the type is rebuilt without it. Safe only
+      -- because of the UPDATE above: no row can still say 'cooldown' by the time this casts.
+      ALTER TABLE access ALTER COLUMN state TYPE TEXT;
+      DROP TYPE access_state;
+      CREATE TYPE access_state AS ENUM ('idle', 'queued', 'active');
+      ALTER TABLE access ALTER COLUMN state TYPE access_state USING state::access_state;
+
+      CREATE INDEX access_queue ON access (queue_seq) WHERE state = 'queued';
+      CREATE INDEX access_active ON access (expires_at, last_seen_at, last_active_at)
+        WHERE state = 'active';
+    `,
+  },
 ];
 
 /** Bring the schema up to date. Safe to run concurrently from any number of instances. */

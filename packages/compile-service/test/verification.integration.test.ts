@@ -1,7 +1,7 @@
 /**
  * Confirming an address, and resetting a password.
  *
- * Verification is not a formality here: accounts are free, so the per-account cooldown is only a
+ * Verification is not a formality here: accounts are free, so a per-account limit is only a
  * limit if an account costs something to make, and a mailbox is that cost. Without it anyone
  * wanting a permanent seat registers ten accounts. So the assertions that matter are the ones
  * about what an unverified account *cannot* do.
@@ -60,7 +60,7 @@ describeWithDb('signing up', () => {
   });
 
   it('refuses a seat until the address is confirmed', async () => {
-    // The whole point. A free account that can take a seat makes the cooldown meaningless.
+    // The whole point. A free account that can take a seat makes the capacity meaningless.
     const server = await verifyingServer();
     const { cookie } = await registerUser(server.app, 'ada@example.com');
 

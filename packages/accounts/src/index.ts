@@ -45,13 +45,10 @@ export type {
 
 export {
   ACCESS_CAPACITY,
-  ACCESS_MAX_COOLDOWN_MS,
-  ACCESS_MIN_COOLDOWN_MS,
   ACCESS_GRACE_MS,
   ACCESS_IDLE_MS,
   ACCESS_SESSION_MS,
   AccessController,
-  CooldownError,
 } from './access.js';
 export type { AccessConfig, AccessState, AccessStatus } from './access.js';
 

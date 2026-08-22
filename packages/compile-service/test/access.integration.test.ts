@@ -3,7 +3,7 @@
  *
  * The store's own tests cover the rules; these cover the wiring -- that signing in is what puts
  * someone in line, that the tool itself is closed to anyone without a seat, and that the one thing
- * which must stay open through a cooldown does stay open.
+ * which must stay open while waiting for a seat does stay open.
  *
  * Capacity is set to two here. Ten is the policy; two is enough to make a queue.
  */
@@ -17,14 +17,11 @@ const describeWithDb = hasDatabase() ? describe : describe.skip;
 
 /** A server with a small capacity and a controllable clock. Two seats is enough to make a queue. */
 async function freshServer(
-  overrides: { capacity?: number; sessionMinutes?: number; cooldownMinutes?: number } = {},
+  overrides: { capacity?: number; sessionMinutes?: number } = {},
 ) {
   const server = await startTestServer('access-integration', {
     capacity: overrides.capacity ?? 2,
     ...(overrides.sessionMinutes !== undefined ? { sessionMinutes: overrides.sessionMinutes } : {}),
-    ...(overrides.cooldownMinutes !== undefined
-      ? { cooldownMinutes: overrides.cooldownMinutes }
-      : {}),
   });
   return { app: server.app, clock: server.clock };
 }
@@ -93,7 +90,8 @@ describeWithDb('signing in', () => {
     expect((await app.inject({ method: 'GET', url: '/api/access/occupancy' })).statusCode).toBe(404);
   });
 
-  it('logging in again during a cooldown succeeds and says how long is left', async () => {
+  it('logging in after the hour is up takes the seat straight back', async () => {
+    // Nobody else is waiting, so there is nothing to protect and no reason to make them wait.
     const { app, clock } = await freshServer();
     const { cookie } = await registerUser(app, 'ada@example.com');
     clock.now += 60 * 60 * 1000;
@@ -105,8 +103,7 @@ describeWithDb('signing in', () => {
       payload: { email: 'ada@example.com', password: PASSWORD },
     });
     expect(response.statusCode).toBe(200);
-    expect(response.json().access.state).toBe('cooldown');
-    expect(response.json().access.cooldownUntil).toBeTruthy();
+    expect(response.json().access.state).toBe('active');
   });
 });
 
@@ -149,7 +146,8 @@ describeWithDb('the tool itself', () => {
       payload: { files: [{ name: 'sketch.ino', contents: 'void setup(){}void loop(){}' }] },
     });
     expect(response.statusCode).toBe(403);
-    expect(response.json().access.state).toBe('cooldown');
+    // No seat, and the tool is gated on holding one -- asking for another is a separate act.
+    expect(response.json().access.state).toBe('idle');
   });
 
   it('closes datasheet extraction the same way', async () => {
@@ -250,16 +248,36 @@ describeWithDb('the queue', () => {
     expect((await heartbeat(app, waiter.cookie)).json().access.state).toBe('active');
   });
 
-  it('refuses to re-queue during a cooldown, and says when it ends', async () => {
+  it('seats someone again immediately when a seat is free', async () => {
     const { app, clock } = await freshServer();
     const { cookie } = await registerUser(app, 'ada@example.com');
     clock.now += 60 * 60 * 1000;
     await heartbeat(app, cookie);
 
     const response = await app.inject({ method: 'POST', url: '/api/access', headers: { cookie } });
-    expect(response.statusCode).toBe(429);
-    expect(response.headers['retry-after']).toBeTruthy();
-    expect(response.json().access.cooldownUntil).toBeTruthy();
+    expect(response.statusCode).toBe(200);
+    expect(response.json().access.state).toBe('active');
+  });
+
+  it('puts someone behind the queue when the seats are full', async () => {
+    // Two seats, both taken by other people. Asking now is a place in line, not a refusal -- and
+    // it is the *back* of the line, which is what stops a finished hour jumping ahead.
+    const { app, clock } = await freshServer({ capacity: 2 });
+    const first = await registerUser(app, 'ada@example.com');
+    clock.now += 60 * 60 * 1000;
+    await heartbeat(app, first.cookie);
+
+    await registerUser(app, 'grace@example.com');
+    await registerUser(app, 'alan@example.com');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/access',
+      headers: { cookie: first.cookie },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().access.state).toBe('queued');
+    expect(response.json().access.position).toBe(1);
   });
 
   it('needs an account for anything but the occupancy count', async () => {
